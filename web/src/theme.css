@@ -1,0 +1,40 @@
+:root {
+  --paper: #f3f6f4;
+  --paper-raised: #ffffff;
+  --ink: #20362e;
+  --ink-muted: #64766c;
+  --line: #dce5df;
+  --clay: #27654c;
+  --clay-press: #194c37;
+  --danger: #9f1239;
+  --radius: 0.75rem;
+  --radius-sm: 0.5rem;
+  --font-display: "Songti SC", "STSong", "Noto Serif SC", "Noto Serif CJK SC", serif;
+  --font-ui: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Noto Sans CJK SC", system-ui, sans-serif;
+  --page-max: 64rem;
+  --login-max: 22rem;
+  --control-min: 2.75rem;
+  --thumb: 4.5rem;
+  --space: 1rem;
+}
+
+* { box-sizing: border-box; }
+body { line-height: 1.6; }
+button, summary, a { -webkit-tap-highlight-color: transparent; }
+button:not(:disabled) { cursor: pointer; }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+:focus-visible { outline: 3px solid #4b8b69; outline-offset: 3px; }
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+}

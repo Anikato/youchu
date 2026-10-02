@@ -1,0 +1,529 @@
+.page {
+  box-sizing: border-box;
+  max-width: var(--login-max);
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: var(--ink);
+  font-family: var(--font-ui);
+}
+
+.loginPage {
+  box-sizing: border-box;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem 1rem;
+}
+
+.loginPanel {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--login-max);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+
+.tagline {
+  margin: 0 0 1.25rem;
+  color: var(--ink-muted);
+}
+
+.title {
+  margin: 0 0 1.25rem;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+}
+
+.field input,
+.field select,
+.field textarea,
+.appPage input,
+.appPage select,
+.appPage textarea {
+  font: inherit;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-raised);
+  color: var(--ink);
+  min-height: var(--control-min);
+  box-sizing: border-box;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.appPage input:focus,
+.appPage select:focus,
+.appPage textarea:focus {
+  outline: 2px solid var(--clay);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  min-height: var(--control-min);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.buttonDanger {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  min-height: var(--control-min);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--danger);
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.buttonPrimary {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  min-height: var(--control-min);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--clay);
+  color: var(--paper-raised);
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.buttonPrimary:active {
+  background: var(--clay-press);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.appPage {
+  box-sizing: border-box;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 1.25rem 1rem;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.appPage input,
+.appPage select,
+.appPage textarea,
+.appPage button,
+.appPage a.button,
+.appPage a.buttonPrimary {
+  min-height: var(--control-min);
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.appPage input,
+.appPage select,
+.appPage textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.appPage button,
+.appPage a.button,
+.appPage a.buttonPrimary {
+  white-space: normal;
+}
+
+.appPage textarea {
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+a.button,
+a.buttonPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+a.button {
+  color: inherit;
+}
+
+a.buttonPrimary {
+  color: var(--paper-raised);
+}
+
+.appPage a {
+  color: inherit;
+}
+
+.appPage a.buttonPrimary {
+  color: var(--paper-raised);
+}
+
+.header {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  padding: 0.35rem 1rem 0.6rem;
+  margin: -1.25rem -1rem 1.25rem;
+  min-width: 0;
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+  min-height: var(--control-min);
+  display: inline-flex;
+  align-items: center;
+}
+
+.user {
+  margin: 0;
+  margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-min);
+  color: inherit;
+  text-decoration: none;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+}
+
+.nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-min);
+  color: inherit;
+  text-decoration: none;
+}
+
+.nav a[aria-current="page"] {
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--clay);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.75rem 0;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+
+.itemLink {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 0.75rem;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.45rem 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.itemLink .path {
+  color: var(--ink-muted);
+}
+
+.itemLinkBody {
+  flex: 1 1 12rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.itemThumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  max-width: var(--thumb);
+  min-width: 0;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex: none;
+  display: block;
+  overflow: hidden;
+}
+
+.photoOriginal {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.photoThumbs {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.photoThumbs li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+}
+
+.appPage button.photoThumbButton {
+  padding: 0;
+  width: var(--thumb);
+  height: var(--thumb);
+  min-height: var(--thumb);
+  line-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-raised);
+  overflow: hidden;
+}
+
+.fileButton {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  min-height: var(--control-min);
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  box-sizing: border-box;
+  max-width: 100%;
+  white-space: normal;
+  overflow: hidden;
+}
+
+.appPage .fileButton input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.path {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: block;
+  color: var(--ink-muted);
+}
+
+.sectionTitle {
+  margin: 1.25rem 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.confirm {
+  margin: 0.75rem 0;
+}
+
+.searchRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.75rem 0;
+}
+
+.searchRow input {
+  flex: 1 1 12rem;
+  width: auto;
+  min-width: 0;
+}
+
+.searchRow button,
+.searchRow a {
+  flex: 0 1 auto;
+}
+
+.filters {
+  margin: 0.75rem 0;
+}
+
+.filters summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: var(--control-min);
+  cursor: pointer;
+}
+
+.filterSummary {
+  margin: 0.75rem 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.filterChoice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  min-height: var(--control-min);
+}
+
+.filterChoice input {
+  width: auto;
+  min-width: 0;
+  min-height: 1.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  flex: none;
+}
+
+.tokenBlock {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tokenBlock .path,
+.tokenPlain {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Shared surfaces keep the same hierarchy across list, edit and account pages. */
+.appPage { padding: 2rem 2rem 4rem; }
+.header { margin: -2rem -2rem 2rem; padding: 1rem 2rem; background: #f3f6f4f5; backdrop-filter: blur(16px); gap: 1rem 2rem; }
+.brand { color: var(--clay); font-size: 1.65rem; letter-spacing: .12em; }
+.nav { gap: .35rem; }
+.nav a { padding: .45rem 1rem; border-radius: 10px; color: var(--ink-muted); }
+.nav a[aria-current="page"] { background: #e1eee5; color: var(--clay); box-shadow: none; }
+.user { padding: .4rem .8rem; border: 1px solid var(--line); border-radius: 99px; font-size: .9rem; }
+.title { font-size: clamp(1.65rem, 3vw, 2.25rem); margin-bottom: .65rem; letter-spacing: .02em; }
+.intro { color: var(--ink-muted); margin: 0 0 1.5rem; }
+.resultCount { color: var(--ink-muted); font-size: .9rem; margin: 1.5rem 0 .75rem; }
+.searchRow { padding: .65rem; background: white; border: 1px solid var(--line); border-radius: 16px; margin: 1.25rem 0; box-shadow: 0 4px 20px #20362e06; }
+.searchRow input { border: none; background: transparent; font-size: 1.05rem; padding: .65rem; }
+.button, .buttonPrimary, .buttonDanger, .fileButton { padding: .65rem 1rem; font-weight: 600; transition: background .15s, border-color .15s; }
+.button:hover { background: #eaf0eb; border-color: #a9beb0; }
+.buttonPrimary:hover { background: var(--clay-press); }
+.buttonDanger:hover { background: #fff0f3; }
+.filters { border: 1px solid var(--line); border-radius: 14px; background: white; padding: .4rem 1rem; }
+.filters summary { font-weight: 600; justify-content: space-between; }
+.filters summary::after { content: '＋'; color: var(--clay); }
+.filters[open] summary::after { content: '−'; }
+.filters[open] summary { margin-bottom: 1rem; border-bottom: 1px solid var(--line); }
+.list { display: grid; gap: .65rem; }
+.list > li { background: white; border: 1px solid var(--line); border-radius: 14px; padding: .9rem 1rem; min-width: 0; }
+.itemLink { text-decoration: none; align-items: center; padding: 0; flex-wrap: nowrap; }
+.itemLinkBody > span:first-child { font-weight: 600; font-size: 1.05rem; }
+.itemLinkBody { flex-basis: 0; }
+.itemLink .path { font-size: .875rem; margin-top: .25rem; }
+.itemPlaceholder { display: flex; align-items: center; justify-content: center; flex: none; width: var(--thumb); height: var(--thumb); border-radius: 12px; background: #eaf1ec; color: #7e9b88; font-family: var(--font-display); font-size: 1.75rem; }
+.itemThumb { border-radius: 12px; }
+.appPage > form:not(.searchRow), .appPage > section, .appPage > div > form { background: white; border: 1px solid var(--line); border-radius: 16px; padding: 1.5rem; margin: 1rem 0; }
+.field { gap: .5rem; margin-bottom: 1.2rem; font-size: .95rem; font-weight: 500; }
+.field input, .field select, .field textarea { padding: .7rem .8rem; font-size: 1rem; font-weight: 400; background: #fcfdfc; }
+.field textarea { min-height: 6rem; }
+.sectionTitle { padding-top: .5rem; margin-bottom: 1rem; }
+.confirm { padding: 1rem; border: 1px solid #eed4dc; border-radius: 12px; background: #fff7f8; }
+.photoOriginal { max-height: 32rem; object-fit: contain; margin: auto; border-radius: 12px; }
+.loginPanel { padding: 2.5rem; max-width: 26rem; box-shadow: 0 16px 60px #20362e0b; }
+.loginPanel .buttonPrimary { width: 100%; }
+.loginPanel .title { color: var(--clay); font-size: 2.5rem; letter-spacing: .15em; }
+
+@media (min-width: 900px) {
+  .list:has(.itemLink) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .appPage { padding: 1.25rem 1rem calc(6rem + env(safe-area-inset-bottom)); }
+  .header { margin: -1.25rem -1rem 1.5rem; padding: .65rem 1rem; }
+  .brand { font-size: 1.4rem; }
+  .nav { position: fixed; bottom: 0; left: 0; right: 0; padding: .4rem .5rem calc(.4rem + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: white; border-top: 1px solid var(--line); box-shadow: 0 -4px 20px #20362e08; }
+  .header { backdrop-filter: none; }
+  .nav a { justify-content: center; min-height: 48px; padding: .5rem .25rem; font-size: .9rem; }
+  .searchRow { gap: .5rem; }
+  .searchRow input { flex-basis: calc(100% - 5rem); }
+  .searchRow > a { width: 100%; }
+  .appPage > form:not(.searchRow), .appPage > section, .appPage > div > form { padding: 1rem; }
+  .itemThumb, .itemPlaceholder { --thumb: 3.5rem; }
+  .list > li { padding: .85rem; }
+  .loginPanel { padding: 1.75rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button, .buttonPrimary, .buttonDanger, .fileButton { transition: none; }
+}

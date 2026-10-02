@@ -25,6 +25,7 @@ type pathJSON struct {
 	Name string  `json:"name"`
 	Type string  `json:"type"`
 	Code *string `json:"code"`
+	Icon *string `json:"icon"`
 }
 
 type locationJSON struct {
@@ -33,6 +34,7 @@ type locationJSON struct {
 	Type            string     `json:"type"`
 	Code            *string    `json:"code"`
 	ParentID        *int64     `json:"parent_id"`
+	Icon            *string    `json:"icon"`
 	Version         int64      `json:"version"`
 	CreatedAt       string     `json:"created_at"`
 	UpdatedAt       string     `json:"updated_at"`
@@ -296,6 +298,7 @@ func createInput(in locationWrite) catalog.CreateInput {
 		Type:   catalog.OptionalText{Present: in.Type.Present, Null: in.Type.Null, Value: in.Type.Value},
 		Code:   catalog.OptionalText{Present: in.Code.Present, Null: in.Code.Null, Value: in.Code.Value},
 		Parent: catalog.OptionalID{Present: in.ParentPresent, Null: in.ParentNull, Value: in.ParentID},
+		Icon:   catalog.OptionalText{Present: in.Icon.Present, Null: in.Icon.Null, Value: in.Icon.Value},
 	}
 }
 
@@ -305,6 +308,7 @@ func updateInput(in locationWrite) catalog.UpdateInput {
 		Type:           catalog.OptionalText{Present: in.Type.Present, Null: in.Type.Null, Value: in.Type.Value},
 		Code:           catalog.OptionalText{Present: in.Code.Present, Null: in.Code.Null, Value: in.Code.Value},
 		Parent:         catalog.OptionalID{Present: in.ParentPresent, Null: in.ParentNull, Value: in.ParentID},
+		Icon:           catalog.OptionalText{Present: in.Icon.Present, Null: in.Icon.Null, Value: in.Icon.Value},
 		VersionPresent: in.VersionPresent,
 		Version:        in.Version,
 	}
@@ -446,7 +450,7 @@ func parseDecimalID(s string) (int64, bool) {
 func toLocationJSON(loc catalog.Location) locationJSON {
 	path := make([]pathJSON, len(loc.Path))
 	for i, node := range loc.Path {
-		path[i] = pathJSON{ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code}
+		path[i] = pathJSON{ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code, Icon: node.Icon}
 	}
 	return locationJSON{
 		ID:              loc.ID,
@@ -454,6 +458,7 @@ func toLocationJSON(loc catalog.Location) locationJSON {
 		Type:            loc.Type,
 		Code:            loc.Code,
 		ParentID:        loc.ParentID,
+		Icon:            loc.Icon,
 		Version:         loc.Version,
 		CreatedAt:       loc.CreatedAt,
 		UpdatedAt:       loc.UpdatedAt,
@@ -1629,7 +1634,7 @@ func toItemJSON(item catalog.Item) itemJSON {
 	for _, link := range item.Locations {
 		path := make([]pathJSON, 0, len(link.Path))
 		for _, node := range link.Path {
-			path = append(path, pathJSON{ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code})
+			path = append(path, pathJSON{ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code, Icon: node.Icon})
 		}
 		locs = append(locs, itemLocationJSON{LocationID: link.LocationID, Note: link.Note, Path: path})
 	}

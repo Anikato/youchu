@@ -240,6 +240,73 @@ func TestMigration006(t *testing.T) {
 	}
 }
 
+func TestMigration007(t *testing.T) {
+	db := migratedDB(t)
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 7`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("version 7 rows = %d", n)
+	}
+	var col string
+	if err := db.QueryRow(`SELECT name FROM pragma_table_info('locations') WHERE name = 'icon'`).Scan(&col); err != nil {
+		t.Fatal(err)
+	}
+	if col != "icon" {
+		t.Fatalf("icon column=%q", col)
+	}
+}
+
+func TestLocationIcon(t *testing.T) {
+	_, h, _ := testHandler(t, false)
+	cookie := login(t, h)
+	created := mustCreate(t, h, cookie, `{"name":"厨房","type":"area"}`)
+	if created.Icon != nil {
+		t.Fatalf("new icon=%v", created.Icon)
+	}
+	if created.Path[0].Icon != nil {
+		t.Fatalf("path icon=%v", created.Path[0].Icon)
+	}
+
+	rec := postLoc(h, cookie, "/api/v1/locations", `{"name":"灶台","type":"area","icon":"kitchen"}`)
+	kitchen := assertCreated(t, rec)
+	if kitchen.Icon == nil || *kitchen.Icon != "kitchen" {
+		t.Fatalf("kitchen icon=%v body=%s", kitchen.Icon, rec.Body.String())
+	}
+	if kitchen.Path[0].Icon == nil || *kitchen.Path[0].Icon != "kitchen" {
+		t.Fatalf("kitchen path icon=%v", kitchen.Path[0].Icon)
+	}
+
+	rec = postLoc(h, cookie, "/api/v1/locations", `{"name":"坏图标","type":"area","icon":"nope"}`)
+	assertInvalidFields(t, rec, map[string]string{"icon": "图标不正确"})
+	rec = postLoc(h, cookie, "/api/v1/locations", `{"name":"空图标","type":"area","icon":""}`)
+	assertInvalidFields(t, rec, map[string]string{"icon": "图标不正确"})
+
+	rec = patchLoc(h, cookie, fmt.Sprintf("/api/v1/locations/%d", created.ID), fmt.Sprintf(`{"version":%d,"icon":"living"}`, created.Version))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch living status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	updated := decodeLoc(t, rec)
+	if updated.Icon == nil || *updated.Icon != "living" {
+		t.Fatalf("living icon=%v", updated.Icon)
+	}
+
+	rec = patchLoc(h, cookie, fmt.Sprintf("/api/v1/locations/%d", updated.ID), fmt.Sprintf(`{"version":%d,"icon":null}`, updated.Version))
+	cleared := decodeLoc(t, rec)
+	if rec.Code != http.StatusOK || cleared.Icon != nil {
+		t.Fatalf("clear icon status=%d icon=%v body=%s", rec.Code, cleared.Icon, rec.Body.String())
+	}
+
+	item := mustItem(t, h, cookie, fmt.Sprintf(`{"name":"锅","locations":[{"location_id":%d}]}`, kitchen.ID))
+	if len(item.Locations) != 1 || item.Locations[0].Path[0].Icon == nil || *item.Locations[0].Path[0].Icon != "kitchen" {
+		t.Fatalf("item path icon=%+v", item.Locations)
+	}
+
+	rec = postLoc(h, "", "/api/v1/locations", `{"name":"无会话","type":"area","icon":"kitchen"}`)
+	assertCode(t, rec, http.StatusUnauthorized, "unauthenticated")
+}
+
 func loadEmbedded() ([]migrate.File, error) {
 	var files []migrate.File
 	err := fs.WalkDir(migrations.FS, ".", func(path string, d fs.DirEntry, err error) error {
@@ -266,6 +333,7 @@ type locBody struct {
 	Type      string  `json:"type"`
 	Code      *string `json:"code"`
 	ParentID  *int64  `json:"parent_id"`
+	Icon      *string `json:"icon"`
 	Version   int64   `json:"version"`
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
@@ -274,6 +342,7 @@ type locBody struct {
 		Name string  `json:"name"`
 		Type string  `json:"type"`
 		Code *string `json:"code"`
+		Icon *string `json:"icon"`
 	} `json:"path"`
 	DirectItemCount int `json:"direct_item_count"`
 }
@@ -1240,6 +1309,7 @@ type itemPathNode struct {
 	Name string  `json:"name"`
 	Type string  `json:"type"`
 	Code *string `json:"code"`
+	Icon *string `json:"icon"`
 }
 
 type itemLinkBody struct {

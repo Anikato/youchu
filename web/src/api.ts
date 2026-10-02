@@ -19,6 +19,7 @@ export type PathNode = {
   name: string;
   type: string;
   code: string | null;
+  icon: string | null;
 };
 
 export type Location = {
@@ -27,6 +28,7 @@ export type Location = {
   type: LocationType;
   code: string | null;
   parent_id: number | null;
+  icon: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -141,6 +143,7 @@ export type LocationCreate = {
   type: LocationType;
   code?: string | null;
   parent_id?: number | null;
+  icon?: string | null;
 };
 
 export type LocationUpdate = {
@@ -148,6 +151,7 @@ export type LocationUpdate = {
   name?: string;
   code?: string | null;
   parent_id?: number | null;
+  icon?: string | null;
 };
 
 export type CategoryCreate = {
@@ -250,7 +254,8 @@ function withQuery(path: string, params: URLSearchParams): string {
 function normalizeLocation(loc: Location): Location {
   return {
     ...loc,
-    path: Array.isArray(loc.path) ? loc.path : [],
+    icon: loc.icon ?? null,
+    path: Array.isArray(loc.path) ? loc.path.map((node) => ({ ...node, icon: node.icon ?? null })) : [],
     direct_item_count: loc.direct_item_count ?? 0,
   };
 }
@@ -286,7 +291,7 @@ function normalizeItem(item: Item): Item {
     deleted_at: item.deleted_at ?? null,
     locations: links.map((link) => ({
       ...link,
-      path: Array.isArray(link.path) ? link.path : [],
+      path: Array.isArray(link.path) ? link.path.map((node) => ({ ...node, icon: node.icon ?? null })) : [],
     })),
     categories: categories.map((link) => ({
       ...link,

@@ -25,6 +25,7 @@ type CreateInput struct {
 	Type   OptionalText
 	Code   OptionalText
 	Parent OptionalID
+	Icon   OptionalText
 }
 
 type UpdateInput struct {
@@ -32,6 +33,7 @@ type UpdateInput struct {
 	Type           OptionalText
 	Code           OptionalText
 	Parent         OptionalID
+	Icon           OptionalText
 	VersionPresent bool
 	Version        int64
 }
@@ -42,6 +44,7 @@ type Location struct {
 	Type            string
 	Code            *string
 	ParentID        *int64
+	Icon            *string
 	Version         int64
 	CreatedAt       string
 	UpdatedAt       string
@@ -54,6 +57,7 @@ type PathNode struct {
 	Name string
 	Type string
 	Code *string
+	Icon *string
 }
 
 type ListKind int
@@ -82,12 +86,12 @@ type ListResult struct {
 	Offset    int
 }
 
-const locationCols = `id, name, type, code, parent_id, version, created_at, updated_at`
+const locationCols = `id, name, type, code, parent_id, icon, version, created_at, updated_at`
 
 const siblingOrder = `CASE type WHEN 'area' THEN 0 WHEN 'fixed' THEN 1 ELSE 2 END, code IS NULL, code, name, id`
 
 func CreateLocation(ctx context.Context, db *sql.DB, now time.Time, in CreateInput) (Location, error) {
-	name, typ, code, parentID, hasParent, err := validateCreate(in)
+	name, typ, code, parentID, hasParent, icon, err := validateCreate(in)
 	if err != nil {
 		return Location{}, err
 	}
@@ -115,9 +119,13 @@ func CreateLocation(ctx context.Context, db *sql.DB, now time.Time, in CreateInp
 		if hasParent {
 			parentArg = parentID
 		}
+		var iconArg any
+		if icon != nil {
+			iconArg = *icon
+		}
 		res, err := conn.ExecContext(ctx, `
-INSERT INTO locations (name, type, code, parent_id, version, created_at, updated_at)
-VALUES (?, ?, ?, ?, 1, ?, ?)`, name, typ, codeArg, parentArg, ts, ts)
+INSERT INTO locations (name, type, code, parent_id, icon, version, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, 1, ?, ?)`, name, typ, codeArg, parentArg, iconArg, ts, ts)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 				return ErrCodeTaken
@@ -144,22 +152,25 @@ func UpdateLocation(ctx context.Context, db *sql.DB, now time.Time, id int64, in
 		if err != nil {
 			return err
 		}
-		name, code, parent, err := resolveUpdate(ctx, conn, loc, in)
+		name, code, parent, icon, err := resolveUpdate(ctx, conn, loc, in)
 		if err != nil {
 			return err
 		}
-		var codeArg, parentArg any
+		var codeArg, parentArg, iconArg any
 		if code != nil {
 			codeArg = *code
 		}
 		if parent != nil {
 			parentArg = *parent
 		}
+		if icon != nil {
+			iconArg = *icon
+		}
 		ts := now.UTC().Format(time.RFC3339Nano)
 		res, err := conn.ExecContext(ctx, `
 UPDATE locations
-SET name = ?, code = ?, parent_id = ?, version = version + 1, updated_at = ?
-WHERE id = ? AND version = ?`, name, codeArg, parentArg, ts, id, loc.Version)
+SET name = ?, code = ?, parent_id = ?, icon = ?, version = version + 1, updated_at = ?
+WHERE id = ? AND version = ?`, name, codeArg, parentArg, iconArg, ts, id, loc.Version)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 				return ErrCodeTaken
@@ -220,7 +231,7 @@ func DeleteLocation(ctx context.Context, db *sql.DB, id, version int64) error {
 	})
 }
 
-func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateInput) (string, *string, *int64, error) {
+func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateInput) (string, *string, *int64, *string, error) {
 	fields := map[string]string{}
 	if !in.VersionPresent || in.Version < 1 {
 		fields["version"] = "版本不正确"
@@ -228,7 +239,7 @@ func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateI
 	if in.Type.Present {
 		fields["type"] = "类型不能修改"
 	}
-	if !in.Name.Present && !in.Code.Present && !in.Parent.Present {
+	if !in.Name.Present && !in.Code.Present && !in.Parent.Present && !in.Icon.Present {
 		fields["request"] = "没有要修改的内容"
 	}
 	name := loc.Name
@@ -257,11 +268,20 @@ func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateI
 	if in.Parent.Present && in.Parent.Null && loc.Type == "fixed" {
 		fields["parent_id"] = "请选择父级"
 	}
+	icon := loc.Icon
+	if in.Icon.Present {
+		next, msg := parseLocationIcon(in.Icon)
+		if msg != "" {
+			fields["icon"] = msg
+		} else {
+			icon = next
+		}
+	}
 	if err := fieldError(fields); err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, nil, err
 	}
 	if in.Version != loc.Version {
-		return "", nil, nil, ErrVersion
+		return "", nil, nil, nil, ErrVersion
 	}
 	parent := loc.ParentID
 	if in.Parent.Present {
@@ -269,13 +289,13 @@ func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateI
 			parent = nil
 		} else {
 			if err := ensureParent(ctx, conn, loc, in.Parent.Value); err != nil {
-				return "", nil, nil, err
+				return "", nil, nil, nil, err
 			}
 			id := in.Parent.Value
 			parent = &id
 		}
 	}
-	return name, code, parent, nil
+	return name, code, parent, icon, nil
 }
 
 func codeForUpdate(typ string, code OptionalText) (*string, string) {
@@ -433,7 +453,7 @@ func ListLocations(ctx context.Context, db *sql.DB, f ListFilter) (ListResult, e
 	return result, nil
 }
 
-func validateCreate(in CreateInput) (name, typ, code string, parentID int64, hasParent bool, err error) {
+func validateCreate(in CreateInput) (name, typ, code string, parentID int64, hasParent bool, icon *string, err error) {
 	fields := map[string]string{}
 	if !in.Name.Present || in.Name.Null {
 		fields["name"] = "请填写名称"
@@ -464,7 +484,15 @@ func validateCreate(in CreateInput) (name, typ, code string, parentID int64, has
 	} else if msg := codeShapeError(in.Code); msg != "" {
 		fields["code"] = msg
 	}
-	return name, typ, code, parentID, hasParent, fieldError(fields)
+	if in.Icon.Present {
+		next, msg := parseLocationIcon(in.Icon)
+		if msg != "" {
+			fields["icon"] = msg
+		} else {
+			icon = next
+		}
+	}
+	return name, typ, code, parentID, hasParent, icon, fieldError(fields)
 }
 
 // Length, internal whitespace, and control characters do not need a valid type.
@@ -579,7 +607,8 @@ func scanLocation(sc rowScanner) (Location, error) {
 	var loc Location
 	var code sql.NullString
 	var parent sql.NullInt64
-	if err := sc.Scan(&loc.ID, &loc.Name, &loc.Type, &code, &parent, &loc.Version, &loc.CreatedAt, &loc.UpdatedAt); err != nil {
+	var icon sql.NullString
+	if err := sc.Scan(&loc.ID, &loc.Name, &loc.Type, &code, &parent, &icon, &loc.Version, &loc.CreatedAt, &loc.UpdatedAt); err != nil {
 		return Location{}, err
 	}
 	if code.Valid {
@@ -589,6 +618,10 @@ func scanLocation(sc rowScanner) (Location, error) {
 	if parent.Valid {
 		id := parent.Int64
 		loc.ParentID = &id
+	}
+	if icon.Valid {
+		s := icon.String
+		loc.Icon = &s
 	}
 	return loc, nil
 }
@@ -604,14 +637,19 @@ func loadPath(ctx context.Context, conn *sql.Conn, id int64) ([]PathNode, error)
 		var node PathNode
 		var code sql.NullString
 		var parent sql.NullInt64
-		err := conn.QueryRowContext(ctx, `SELECT id, name, type, code, parent_id FROM locations WHERE id = ?`, id).
-			Scan(&node.ID, &node.Name, &node.Type, &code, &parent)
+		var icon sql.NullString
+		err := conn.QueryRowContext(ctx, `SELECT id, name, type, code, parent_id, icon FROM locations WHERE id = ?`, id).
+			Scan(&node.ID, &node.Name, &node.Type, &code, &parent, &icon)
 		if err != nil {
 			return nil, err
 		}
 		if code.Valid {
 			s := code.String
 			node.Code = &s
+		}
+		if icon.Valid {
+			s := icon.String
+			node.Icon = &s
 		}
 		chain = append(chain, node)
 		if !parent.Valid {

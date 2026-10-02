@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, type CSSProperties } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ApiError,
@@ -62,7 +62,9 @@ import {
   uploadItemPhoto,
 } from "./api";
 import { clampPageOffset, readItemList, writeItemList, type ItemListState } from "./filters";
+import { ICON_GROUPS, LocationIcon, defaultIconLabel, resolvedIcon } from "./icons";
 import styles from "./styles.module.css";
+import { type Accent, type Theme, readAccent, readTheme, setAccent, setTheme } from "./theme";
 
 const typeLabel: Record<LocationType, string> = {
   area: "区域",
@@ -91,6 +93,7 @@ const inlineFields = new Set([
   "note",
   "code",
   "parent_id",
+  "icon",
   "locations",
   "categories",
   "type",
@@ -124,6 +127,75 @@ function formatPath(path: { name: string; code: string | null }[]): string {
 
 function formatCategoryPath(path: CategoryPathNode[]): string {
   return path.map((node) => node.name).join(" / ");
+}
+
+function treeDepth(pathLength: number): number {
+  return Math.max(0, Math.min((pathLength || 1) - 1, 6));
+}
+
+function treeStyle(pathLength: number): CSSProperties {
+  return { ["--tree-depth" as string]: treeDepth(pathLength) } as CSSProperties;
+}
+
+function optionPrefix(pathLength: number): string {
+  return "\u3000".repeat(treeDepth(pathLength));
+}
+
+function LocationPathLine({ path }: { path: PathNode[] }) {
+  const last = path[path.length - 1];
+  return (
+    <span className={`${styles.path} ${styles.pathWithIcon}`}>
+      {last ? <LocationIcon name={resolvedIcon(last)} /> : null}
+      <span>{path.length > 0 ? formatPath(path) : ""}</span>
+    </span>
+  );
+}
+
+function IconPicker({
+  value,
+  type,
+  onChange,
+  error,
+}: {
+  value: string | null;
+  type?: LocationType | "";
+  onChange: (value: string | null) => void;
+  error?: string;
+}) {
+  const previewType = type && isLocationType(type) ? type : "";
+  return (
+    <fieldset className={styles.iconPicker}>
+      <legend>图标</legend>
+      <label className={`${styles.iconChoice} ${value == null ? styles.iconChoiceOn : ""}`}>
+        <input type="radio" name="icon" checked={value == null} onChange={() => onChange(null)} />
+        {previewType ? <LocationIcon name={resolvedIcon({ icon: null, type: previewType })} /> : null}
+        <span>默认（{defaultIconLabel(previewType)}）</span>
+      </label>
+      {ICON_GROUPS.map((group) => (
+        <div key={group.label}>
+          <p className={styles.iconGroupLabel}>{group.label}</p>
+          <div className={styles.iconGrid}>
+            {group.icons.map((icon) => (
+              <label
+                key={icon.slug}
+                className={`${styles.iconChoice} ${value === icon.slug ? styles.iconChoiceOn : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="icon"
+                  checked={value === icon.slug}
+                  onChange={() => onChange(icon.slug)}
+                />
+                <LocationIcon name={icon.slug} />
+                <span>{icon.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+      {error ? <span className={styles.error}>{error}</span> : null}
+    </fieldset>
+  );
 }
 
 function cloneLinks(links: ItemLocation[]): ItemLocation[] {
@@ -224,8 +296,14 @@ function itemBody(draft: ItemDraft, originalCategoryIds?: number[]): ItemCreate 
   return body;
 }
 
-function locationCreateBody(type: LocationType, name: string, code: string, parentId: number | null): LocationCreate {
-  const body: LocationCreate = { name, type };
+function locationCreateBody(
+  type: LocationType,
+  name: string,
+  code: string,
+  parentId: number | null,
+  icon: string | null,
+): LocationCreate {
+  const body: LocationCreate = { name, type, icon };
   if (type !== "area") body.code = code;
   if (parentId != null) body.parent_id = parentId;
   return body;
@@ -237,8 +315,9 @@ function locationUpdateBody(
   name: string,
   code: string,
   parentId: number | null,
+  icon: string | null,
 ): LocationUpdate {
-  const body: LocationUpdate = { version, name, parent_id: parentId };
+  const body: LocationUpdate = { version, name, parent_id: parentId, icon };
   if (type !== "area") body.code = code;
   return body;
 }
@@ -286,6 +365,7 @@ function AppShell({ username }: { username: string }) {
     <main className={styles.appPage}>
       <header className={styles.header}>
         <Link className={styles.brand} to="/" aria-label="有处">
+          <img className={styles.brandIcon} src="/logo-yc.svg" alt="" />
           有处
         </Link>
         <nav className={styles.nav} aria-label="主要">
@@ -798,7 +878,7 @@ function ItemLocationsField({
       <span>存放位置</span>
       {links.map((link) => (
         <div key={link.location_id}>
-          <span className={styles.path}>{link.path.length > 0 ? formatPath(link.path) : String(link.location_id)}</span>
+          {link.path.length > 0 ? <LocationPathLine path={link.path} /> : <span className={styles.path}>{String(link.location_id)}</span>}
           <label className={styles.field}>
             放置说明
             <textarea
@@ -830,6 +910,7 @@ function ItemLocationsField({
             <option value="">选择存放位置</option>
             {available.map((loc) => (
               <option key={loc.id} value={loc.id}>
+                {optionPrefix(loc.path.length)}
                 {formatPath(loc.path)}
               </option>
             ))}
@@ -907,6 +988,7 @@ function ItemCategoriesField({
             <option value="">选择分类</option>
             {available.map((cat) => (
               <option key={cat.id} value={cat.id}>
+                {optionPrefix(cat.path.length)}
                 {formatCategoryPath(cat.path)}
               </option>
             ))}
@@ -987,6 +1069,7 @@ function ParentField({
           {parentId != null && !known ? <option value={parentId}>{fallbackLabel ?? "已选择的父级"}</option> : null}
           {options.data.map((loc) => (
             <option key={loc.id} value={loc.id}>
+              {optionPrefix(loc.path.length)}
               {formatPath(loc.path)}
             </option>
           ))}
@@ -1232,6 +1315,7 @@ export function ItemListPage() {
               ) : null}
               {locations.map((loc) => (
                 <option key={loc.id} value={loc.id}>
+                  {optionPrefix(loc.path.length)}
                   {formatPath(loc.path)}
                 </option>
               ))}
@@ -1277,6 +1361,7 @@ export function ItemListPage() {
                 <option value="">选择分类</option>
                 {availableCategories.map((cat) => (
                   <option key={cat.id} value={cat.id}>
+                    {optionPrefix(cat.path.length)}
                     {formatCategoryPath(cat.path)}
                   </option>
                 ))}
@@ -1407,9 +1492,7 @@ export function ItemListPage() {
                     <span className={styles.meta}>待定位</span>
                   ) : (
                     item.locations.map((link) => (
-                      <span key={link.location_id} className={styles.path}>
-                        {formatPath(link.path)}
-                      </span>
+                      <LocationPathLine key={link.location_id} path={link.path} />
                     ))
                   )}
                 </span>
@@ -2159,11 +2242,22 @@ export function ReturnListPage() {
 
 function LocationLinks({ rows }: { rows: Location[] }) {
   return (
-    <ul className={styles.list}>
+    <ul className={`${styles.list} ${styles.treeList}`}>
       {rows.map((row) => (
-        <li key={row.id}>
+        <li
+          key={row.id}
+          className={treeDepth(row.path.length) > 0 ? styles.treeChild : undefined}
+          style={treeStyle(row.path.length)}
+        >
           <Link className={styles.itemLink} to={`/locations/${row.id}`}>
-            <span className={styles.itemLinkBody}>{formatNode(row)}</span>
+            <LocationIcon name={resolvedIcon(row)} className={styles.rowIcon} />
+            <span className={styles.itemLinkBody}>
+              <span>{row.name}</span>
+              {row.code ? <span className={styles.codeBadge}>{row.code}</span> : null}
+              {row.direct_item_count > 0 ? (
+                <span className={styles.countMuted}>{row.direct_item_count} 件</span>
+              ) : null}
+            </span>
           </Link>
         </li>
       ))}
@@ -2253,6 +2347,7 @@ function LocationCreateForm({ parentParam }: { parentParam: string }) {
   const [code, setCode] = useState("");
   const [type, setType] = useState<LocationType | "">("");
   const [parentId, setParentId] = useState<number | null>(null);
+  const [icon, setIcon] = useState<string | null>(null);
   const [formError, setFormError] = useState<ApiError | null>(null);
 
   useEffect(() => {
@@ -2295,7 +2390,7 @@ function LocationCreateForm({ parentParam }: { parentParam: string }) {
     }
     setFormError(null);
     const chosenParent = hasParent ? (parentQuery.data?.id ?? null) : parentId;
-    create.mutate(locationCreateBody(type, name, code, chosenParent));
+    create.mutate(locationCreateBody(type, name, code, chosenParent, icon));
   }
 
   if (hasParent && parentQuery.isError) {
@@ -2363,6 +2458,7 @@ function LocationCreateForm({ parentParam }: { parentParam: string }) {
             error={fieldText(formError, "parent_id")}
           />
         ) : null}
+        <IconPicker value={icon} type={type} onChange={setIcon} error={fieldText(formError, "icon")} />
         <FormIssues error={formError} />
         <button className={styles.button} type="submit" disabled={create.isPending}>
           保存
@@ -2416,6 +2512,7 @@ function LocationScreen({ id }: { id: string }) {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [parentId, setParentId] = useState<number | null>(null);
+  const [icon, setIcon] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [conflict, setConflict] = useState(false);
   const [conflictMessage, setConflictMessage] = useState("");
@@ -2432,6 +2529,7 @@ function LocationScreen({ id }: { id: string }) {
     setName(loc.data.name);
     setCode(loc.data.code ?? "");
     setParentId(loc.data.parent_id);
+    setIcon(loc.data.icon);
     setVersion(loc.data.version);
     setFormReady(true);
   }, [formReady, recordReady, loc.data]);
@@ -2440,6 +2538,7 @@ function LocationScreen({ id }: { id: string }) {
     setName(next.name);
     setCode(next.code ?? "");
     setParentId(next.parent_id);
+    setIcon(next.icon);
     setVersion(next.version);
     setConflict(false);
   }
@@ -2540,7 +2639,7 @@ function LocationScreen({ id }: { id: string }) {
   function onSave(event: FormEvent) {
     event.preventDefault();
     setFormError(null);
-    save.mutate(locationUpdateBody(record.type, version, name, code, parentId));
+    save.mutate(locationUpdateBody(record.type, version, name, code, parentId, icon));
   }
 
   function onQuick(event: FormEvent) {
@@ -2643,6 +2742,7 @@ function LocationScreen({ id }: { id: string }) {
           error={fieldText(formError, "parent_id")}
           fallbackLabel={fallbackLabel}
         />
+        <IconPicker value={icon} type={record.type} onChange={setIcon} error={fieldText(formError, "icon")} />
         <FormIssues error={formError} />
         {conflict ? (
           <ConflictNotice message={conflictMessage} pending={loadingLatest} onLoad={() => void loadLatest()} error={latestError} />
@@ -2679,11 +2779,20 @@ function categoryCreateBody(name: string, parentId: number | null): CategoryCrea
 
 function CategoryLinks({ rows }: { rows: Category[] }) {
   return (
-    <ul className={styles.list}>
+    <ul className={`${styles.list} ${styles.treeList}`}>
       {rows.map((row) => (
-        <li key={row.id}>
+        <li
+          key={row.id}
+          className={treeDepth(row.path.length) > 0 ? styles.treeChild : undefined}
+          style={treeStyle(row.path.length)}
+        >
           <Link className={styles.itemLink} to={`/categories/${row.id}`}>
-            <span className={styles.itemLinkBody}>{row.name}</span>
+            <span className={styles.itemLinkBody}>
+              <span>{row.name}</span>
+              {row.direct_item_count > 0 ? (
+                <span className={styles.countMuted}>{row.direct_item_count} 件</span>
+              ) : null}
+            </span>
           </Link>
         </li>
       ))}
@@ -2736,6 +2845,7 @@ function CategoryParentField({
           {parentId != null && !known ? <option value={parentId}>{fallbackLabel ?? "已选择的父级"}</option> : null}
           {options.data.map((cat) => (
             <option key={cat.id} value={cat.id}>
+              {optionPrefix(cat.path.length)}
               {formatCategoryPath(cat.path)}
             </option>
           ))}
@@ -3344,7 +3454,7 @@ function TrashItemScreen({ id }: { id: string }) {
         <span>存放位置</span>
         {item.locations.map((link) => (
           <div key={link.location_id}>
-            <span className={styles.path}>{link.path.length > 0 ? formatPath(link.path) : String(link.location_id)}</span>
+            {link.path.length > 0 ? <LocationPathLine path={link.path} /> : <span className={styles.path}>{String(link.location_id)}</span>}
             {link.note ? <span className={styles.meta}>{link.note}</span> : null}
           </div>
         ))}
@@ -3409,6 +3519,57 @@ function TrashItemScreen({ id }: { id: string }) {
         />
       </div>
     </>
+  );
+}
+
+function AppearanceFields() {
+  const [theme, setThemeState] = useState<Theme>(() => readTheme());
+  const [accent, setAccentState] = useState<Accent>(() => readAccent());
+
+  function pickTheme(next: Theme) {
+    setTheme(next);
+    setThemeState(next);
+  }
+
+  function pickAccent(next: Accent) {
+    setAccent(next);
+    setAccentState(next);
+  }
+
+  return (
+    <section>
+      <h2 className={styles.sectionTitle}>外观</h2>
+      <fieldset className={styles.field}>
+        <legend>亮度</legend>
+        <div className={styles.choiceRow}>
+          <label className={styles.filterChoice}>
+            <input type="radio" name="theme" checked={theme === "dark"} onChange={() => pickTheme("dark")} />
+            深色
+          </label>
+          <label className={styles.filterChoice}>
+            <input type="radio" name="theme" checked={theme === "light"} onChange={() => pickTheme("light")} />
+            浅色
+          </label>
+        </div>
+      </fieldset>
+      <fieldset className={styles.field}>
+        <legend>强调色</legend>
+        <div className={styles.choiceRow}>
+          <label className={styles.filterChoice}>
+            <input type="radio" name="accent" checked={accent === "moss"} onChange={() => pickAccent("moss")} />
+            苔绿
+          </label>
+          <label className={styles.filterChoice}>
+            <input type="radio" name="accent" checked={accent === "clay"} onChange={() => pickAccent("clay")} />
+            陶土
+          </label>
+          <label className={styles.filterChoice}>
+            <input type="radio" name="accent" checked={accent === "ink"} onChange={() => pickAccent("ink")} />
+            墨蓝
+          </label>
+        </div>
+      </fieldset>
+    </section>
   );
 }
 
@@ -3526,6 +3687,7 @@ export function AccountPage() {
   return (
     <>
       <h1 className={styles.title}>账号</h1>
+      <AppearanceFields />
       <h2 className={styles.sectionTitle}>用户名</h2>
       <form onSubmit={onUsernameSubmit}>
         <label className={styles.field}>

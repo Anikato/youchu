@@ -47,6 +47,7 @@ type locationWrite struct {
 	ParentPresent  bool
 	ParentNull     bool
 	ParentID       int64
+	Icon           textValue
 	VersionPresent bool
 	Version        int64
 }
@@ -220,6 +221,12 @@ func decodeLocationWrite(body []byte) (locationWrite, error) {
 		out.ParentPresent = true
 		out.ParentNull = isNull
 		out.ParentID = id
+	}
+	if raw, ok := obj["icon"]; ok {
+		out.Icon, err = decodeNullableString(raw)
+		if err != nil {
+			return locationWrite{}, err
+		}
 	}
 	if raw, ok := obj["version"]; ok {
 		out.Version, err = decodeInteger(raw)

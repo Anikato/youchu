@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>有处图标</title>
+  <path fill="#27654c" d="M8 26h8v22h32V26h8v22a8 8 0 0 1-8 8H16a8 8 0 0 1-8-8V26Z"/>
+  <path fill="#27654c" fill-rule="evenodd" d="M32 6c-7.732 0-14 6.268-14 14 0 9 14 22 14 22s14-13 14-22c0-7.732-6.268-14-14-14Zm0 9a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z" clip-rule="evenodd"/>
+</svg>

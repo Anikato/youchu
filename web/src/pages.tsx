@@ -23,6 +23,7 @@ import {
   type ReturnTask,
   type ReturnTaskCreate,
   changePassword,
+  cloneLocation,
   completeReturnTask,
   createCategory,
   createItem,
@@ -2649,6 +2650,8 @@ function LocationScreen({ id }: { id: string }) {
   const [confirming, setConfirming] = useState(false);
   const [deleteError, setDeleteError] = useState<ApiError | null>(null);
   const [quickName, setQuickName] = useState("");
+  const [cloneNotice, setCloneNotice] = useState("");
+  const [cloneError, setCloneError] = useState("");
   const recordReady = loc.isSuccess && loc.isFetchedAfterMount && !loc.isFetching && loc.data != null;
 
   useEffect(() => {
@@ -2716,12 +2719,25 @@ function LocationScreen({ id }: { id: string }) {
       await queryClient.invalidateQueries({ queryKey: ["location", id] });
     },
   });
+  const cloneBox = useMutation({
+    mutationFn: () => cloneLocation(id),
+    onSuccess: (created) => {
+      setCloneNotice(`已克隆为 ${created.code ?? created.name}`);
+      setCloneError("");
+      void queryClient.invalidateQueries({ queryKey: ["locations"] });
+    },
+    onError: (error) => {
+      setCloneNotice("");
+      setCloneError(messageOf(error, "无法克隆"));
+    },
+  });
   useOnUnauth(loc.error);
   useOnUnauth(children.error);
   useOnUnauth(directItems.error);
   useOnUnauth(save.error);
   useOnUnauth(remove.error);
   useOnUnauth(quick.error);
+  useOnUnauth(cloneBox.error);
 
   async function loadLatest() {
     setLoadingLatest(true);
@@ -2784,6 +2800,20 @@ function LocationScreen({ id }: { id: string }) {
     <>
       <h1 className={styles.title}>{heading}</h1>
       <Breadcrumb path={record.path} />
+      {record.type === "movable" ? (
+        <div className={styles.actions}>
+          <button
+            className={styles.button}
+            type="button"
+            disabled={cloneBox.isPending}
+            onClick={() => cloneBox.mutate()}
+          >
+            克隆
+          </button>
+        </div>
+      ) : null}
+      {cloneNotice ? <p>{cloneNotice}</p> : null}
+      {cloneError ? <p className={styles.error}>{cloneError}</p> : null}
       <section>
         <h2 className={styles.sectionTitle}>子位置</h2>
         <div className={styles.actions}>

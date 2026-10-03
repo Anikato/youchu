@@ -443,6 +443,11 @@ export async function updateLocation(id: string, body: LocationUpdate): Promise<
   return normalizeLocation(loc);
 }
 
+export async function cloneLocation(id: string): Promise<Location> {
+  const loc = await sendJSON<Location>(`/api/v1/locations/${encodeURIComponent(id)}/clone`, "POST", {}, "无法克隆");
+  return normalizeLocation(loc);
+}
+
 export async function listLocationIcons(): Promise<LocationIconRecord[]> {
   const page = await getJSON<{ data: LocationIconRecord[] }>("/api/v1/location-icons", "无法读取图标");
   return Array.isArray(page.data) ? page.data : [];

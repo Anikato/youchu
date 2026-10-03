@@ -158,6 +158,83 @@ VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`, name, typ, codeArg, parentArg, iconArg, cus
 	return created, nil
 }
 
+func CloneLocation(ctx context.Context, db *sql.DB, now time.Time, id int64) (Location, error) {
+	var created Location
+	err := withImmediate(ctx, db, func(conn *sql.Conn) error {
+		loc, err := loadLocation(ctx, conn, id)
+		if err != nil {
+			return err
+		}
+		if loc.Type != "movable" {
+			return fieldError(map[string]string{"type": "只有移动容器可以克隆"})
+		}
+		if loc.Code == nil {
+			return fieldError(map[string]string{"code": "编号无法递增"})
+		}
+		code := *loc.Code
+		chosen := ""
+		for range 10000 {
+			next, err := NextBoxCode(code)
+			if err != nil {
+				return err
+			}
+			taken, err := codeTaken(ctx, conn, next)
+			if err != nil {
+				return err
+			}
+			if !taken {
+				chosen = next
+				break
+			}
+			code = next
+		}
+		if chosen == "" {
+			return fieldError(map[string]string{"code": "编号无法递增"})
+		}
+		ts := now.UTC().Format(time.RFC3339Nano)
+		var parentArg any
+		if loc.ParentID != nil {
+			parentArg = *loc.ParentID
+		}
+		var iconArg any
+		if loc.Icon != nil {
+			iconArg = *loc.Icon
+		}
+		var customArg any
+		if loc.CustomIconID != nil {
+			customArg = *loc.CustomIconID
+		}
+		res, err := conn.ExecContext(ctx, `
+INSERT INTO locations (name, type, code, parent_id, icon, custom_icon_id, version, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`, loc.Name, loc.Type, chosen, parentArg, iconArg, customArg, ts, ts)
+		if err != nil {
+			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+				return ErrCodeTaken
+			}
+			return err
+		}
+		newID, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		created, err = loadLocation(ctx, conn, newID)
+		return err
+	})
+	if err != nil {
+		return Location{}, err
+	}
+	return created, nil
+}
+
+func codeTaken(ctx context.Context, conn *sql.Conn, code string) (bool, error) {
+	var n int
+	err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM locations WHERE code = ?`, code).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 func UpdateLocation(ctx context.Context, db *sql.DB, now time.Time, id int64, in UpdateInput) (Location, error) {
 	var updated Location
 	err := withImmediate(ctx, db, func(conn *sql.Conn) error {

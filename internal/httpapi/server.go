@@ -78,6 +78,7 @@ func newHandler(db *sql.DB, cfg config.Config, dummyHash string, now func() time
 	mux.HandleFunc("/api/v1/me/password", h.mePassword)
 	mux.HandleFunc("/api/v1/locations", h.locationsCollection)
 	mux.HandleFunc("/api/v1/locations/{id}", h.locationByID)
+	mux.HandleFunc("/api/v1/locations/{id}/clone", h.locationClone)
 	mux.HandleFunc("/api/v1/location-icons", h.locationIconsCollection)
 	mux.HandleFunc("/api/v1/location-icons/{id}", h.locationIconByID)
 	mux.HandleFunc("/api/v1/items", h.itemsCollection)

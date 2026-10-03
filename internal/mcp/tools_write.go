@@ -47,6 +47,10 @@ type updateItemArgs struct {
 	Locations    *[]itemLocationArg `json:"locations,omitempty" jsonschema:"存放位置"`
 }
 
+type cloneLocationArgs struct {
+	ID int64 `json:"id" jsonschema:"位置 id"`
+}
+
 type createLocationArgs struct {
 	Name         string  `json:"name" jsonschema:"位置名称"`
 	Type         string  `json:"type" jsonschema:"area、fixed 或 movable"`
@@ -119,6 +123,11 @@ func (s *Server) registerWriteTools(mcpServer *sdk.Server) {
 		Annotations: writeAnnotations,
 		InputSchema: locationUpdateInputSchema(),
 	}, s.updateLocation)
+	sdk.AddTool(mcpServer, &sdk.Tool{
+		Name:        "youchu_clone_location",
+		Description: "克隆移动容器。与 POST /api/v1/locations/{id}/clone 相同。",
+		Annotations: writeAnnotations,
+	}, s.cloneLocation)
 	sdk.AddTool(mcpServer, &sdk.Tool{
 		Name:        "youchu_create_location_icon",
 		Description: "上传位置自传 SVG 图标。与 POST /api/v1/location-icons 相同。",
@@ -231,6 +240,17 @@ func (s *Server) createLocation(ctx context.Context, _ *sdk.CallToolRequest, in 
 		Icon:   optionalText(in.Icon),
 		Custom: custom,
 	})
+	if err != nil {
+		return writeToolError(err), nil, nil
+	}
+	return textResult(toLocationJSON(loc))
+}
+
+func (s *Server) cloneLocation(ctx context.Context, _ *sdk.CallToolRequest, in cloneLocationArgs) (*sdk.CallToolResult, any, error) {
+	if res := s.requireScope(ctx, "write"); res != nil {
+		return res, nil, nil
+	}
+	loc, err := catalog.CloneLocation(ctx, s.db, s.now(), in.ID)
 	if err != nil {
 		return writeToolError(err), nil, nil
 	}

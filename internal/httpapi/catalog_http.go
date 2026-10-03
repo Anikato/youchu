@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -96,6 +97,54 @@ func (h *handler) locationByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.notFound(w, r)
 	}
+}
+
+func (h *handler) locationClone(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		h.cloneLocation(w, r)
+	default:
+		h.notFound(w, r)
+	}
+}
+
+func (h *handler) cloneLocation(w http.ResponseWriter, r *http.Request) {
+	if !h.originOK(w, r) {
+		return
+	}
+	if !h.currentUser(w, r) {
+		return
+	}
+	body, ok := readLimited(w, r, 32768)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		writeFields(w, queryRejected(r))
+		return
+	}
+	if trimmed := strings.TrimSpace(string(body)); trimmed != "" {
+		if !strings.HasPrefix(trimmed, "{") {
+			writeError(w, http.StatusBadRequest, "invalid_body", "请求格式不正确")
+			return
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_body", "请求格式不正确")
+			return
+		}
+	}
+	id, ok := parseDecimalID(r.PathValue("id"))
+	if !ok {
+		h.notFound(w, r)
+		return
+	}
+	loc, err := catalog.CloneLocation(r.Context(), h.db, h.now(), id)
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toLocationJSON(loc))
 }
 
 type locationIconJSON struct {

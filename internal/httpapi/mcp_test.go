@@ -287,6 +287,7 @@ func TestMCPReadToolList(t *testing.T) {
 		"youchu_update_item":               {},
 		"youchu_create_location":           {},
 		"youchu_update_location":           {},
+		"youchu_clone_location":            {},
 		"youchu_create_location_icon":      {},
 		"youchu_update_location_icon":      {},
 		"youchu_delete_location_icon":      {},

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router";
+import { EnterBox } from "./motion";
 import { fetchMe, login } from "./api";
 import {
   AccountPage,
@@ -75,7 +76,7 @@ function LoginPage() {
 
   return (
     <main className={styles.loginPage}>
-      <div className={styles.loginPanel}>
+      <EnterBox className={styles.loginPanel}>
         <h1 className={styles.title}>有处</h1>
         <p className={styles.tagline}>家里的东西在哪儿</p>
         <form onSubmit={onSubmit}>
@@ -103,7 +104,7 @@ function LoginPage() {
           </button>
         </form>
         {error ? <p className={styles.error}>{error}</p> : null}
-      </div>
+      </EnterBox>
     </main>
   );
 }

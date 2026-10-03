@@ -1,0 +1,15 @@
+{
+  "name": "有处",
+  "short_name": "有处",
+  "description": "家里的东西在哪儿",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "lang": "zh-CN",
+  "background_color": "#161a18",
+  "theme_color": "#161a18",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

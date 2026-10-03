@@ -494,7 +494,12 @@ a.buttonPrimary {
 .itemLink .path { font-size: .875rem; margin-top: .25rem; }
 .itemPlaceholder { display: flex; align-items: center; justify-content: center; flex: none; width: var(--thumb); height: var(--thumb); border-radius: 12px; background: color-mix(in srgb, var(--clay) 12%, var(--paper)); color: var(--ink-muted); font-family: var(--font-display); font-size: 1.75rem; }
 .itemThumb { border-radius: 12px; }
-.appPage > form:not(.searchRow), .appPage > section, .appPage > div > form { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 16px; padding: 1.5rem; margin: 1rem 0; }
+.pageEnter { min-width: 0; }
+.appPage > form:not(.searchRow),
+.appPage > section,
+.appPage > div > form,
+.appPage > .pageEnter > form:not(.searchRow),
+.appPage > .pageEnter > section { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 16px; padding: 1.5rem; margin: 1rem 0; }
 .field { gap: .5rem; margin-bottom: 1.2rem; font-size: .95rem; font-weight: 500; }
 .field input, .field select, .field textarea { padding: .7rem .8rem; font-size: 1rem; font-weight: 400; background: color-mix(in srgb, var(--paper-raised) 80%, var(--paper)); }
 .field textarea { min-height: 6rem; }
@@ -543,7 +548,11 @@ a.buttonPrimary {
   .searchRow { gap: .5rem; }
   .searchRow input { flex-basis: calc(100% - 5rem); }
   .searchRow > a { width: 100%; }
-  .appPage > form:not(.searchRow), .appPage > section, .appPage > div > form { padding: 1rem; }
+  .appPage > form:not(.searchRow),
+  .appPage > section,
+  .appPage > div > form,
+  .appPage > .pageEnter > form:not(.searchRow),
+  .appPage > .pageEnter > section { padding: 1rem; }
   .itemThumb, .itemPlaceholder { --thumb: 3.5rem; }
   .list > li { padding: .85rem; }
   .loginPanel { padding: 1.75rem; }

@@ -201,8 +201,10 @@ func TestSPAServesIndexAndAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	web := fstest.MapFS{
-		"index.html":    {Data: []byte("<!doctype html><title>有处</title>")},
-		"assets/app.js": {Data: []byte("console.log(1)")},
+		"index.html":            {Data: []byte("<!doctype html><title>有处</title>")},
+		"assets/app.js":         {Data: []byte("console.log(1)")},
+		"manifest.json":         {Data: []byte(`{"name":"有处","display":"standalone"}`)},
+		"apple-touch-icon.png":  {Data: []byte("png")},
 	}
 	h := newHandler(db, config.Config{
 		DataDir:      dir,
@@ -224,6 +226,14 @@ func TestSPAServesIndexAndAssets(t *testing.T) {
 	asset := request(h, http.MethodGet, "/assets/app.js", "", "", "203.0.113.5:1", "")
 	if asset.Code != http.StatusOK || asset.Body.String() != "console.log(1)" {
 		t.Fatalf("asset status=%d body=%s", asset.Code, asset.Body.String())
+	}
+	manifest := request(h, http.MethodGet, "/manifest.json", "", "", "203.0.113.5:1", "")
+	if manifest.Code != http.StatusOK || !strings.Contains(manifest.Body.String(), `"standalone"`) {
+		t.Fatalf("manifest status=%d body=%s", manifest.Code, manifest.Body.String())
+	}
+	icon := request(h, http.MethodGet, "/apple-touch-icon.png", "", "", "203.0.113.5:1", "")
+	if icon.Code != http.StatusOK || icon.Body.String() != "png" {
+		t.Fatalf("icon status=%d body=%s", icon.Code, icon.Body.String())
 	}
 	api404 := request(h, http.MethodGet, "/api/v1/does-not-exist", "", "", "203.0.113.5:1", "")
 	assertCode(t, api404, http.StatusNotFound, "not_found")

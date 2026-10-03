@@ -69,6 +69,8 @@ import {
 } from "./api";
 import { clampPageOffset, readItemList, writeItemList, type ItemListState } from "./filters";
 import { ICON_GROUPS, CustomSVG, LocationGlyph, defaultIconLabel } from "./icons";
+import { PageEnter, StaggerList } from "./motion";
+import { PhotoAddButtons } from "./photos";
 import styles from "./styles.module.css";
 import { type Accent, type Theme, readAccent, readTheme, setAccent, setTheme } from "./theme";
 
@@ -469,7 +471,9 @@ function AppShell({ username }: { username: string }) {
         </Link>
       </header>
       {notice ? <p>{notice}</p> : null}
-      <Outlet />
+      <PageEnter pathname={pathname} className={styles.pageEnter}>
+        <Outlet />
+      </PageEnter>
     </main>
   );
 }
@@ -915,22 +919,7 @@ function ItemPhotoSection({ itemId, photos, readOnly }: { itemId: string; photos
       {readOnly ? null : atLimit ? (
         <p>一件物品最多 20 张照片</p>
       ) : (
-        <label className={styles.fileButton}>
-          添加照片
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            multiple
-            disabled={busy}
-            onChange={(event) => {
-              // FileList is live; copy before clearing so the same control can pick again.
-              const files = Array.from(event.currentTarget.files ?? []);
-              event.currentTarget.value = "";
-              if (files.length === 0) return;
-              void handleFiles(files);
-            }}
-          />
-        </label>
+        <PhotoAddButtons disabled={busy} remaining={20 - ordered.length} onFiles={(files) => void handleFiles(files)} />
       )}
     </section>
   );
@@ -1563,7 +1552,7 @@ export function ItemListPage() {
       {page && page.total === 0 ? <p>{emptyCopy(view)}</p> : null}
       {page && page.total > 0 ? <p className={styles.resultCount}>共 {page.total} 件物品</p> : null}
       {page && page.data.length > 0 ? (
-        <ul className={styles.list}>
+        <StaggerList className={styles.list}>
           {page.data.map((item) => (
             <li key={item.id}>
               <Link className={styles.itemLink} to={`/items/${item.id}`}>
@@ -1581,7 +1570,7 @@ export function ItemListPage() {
               </Link>
             </li>
           ))}
-        </ul>
+        </StaggerList>
       ) : null}
       {page ? (
         <Pager
@@ -1635,6 +1624,9 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
   const [formReady, setFormReady] = useState(!hasPreset);
   const [draft, setDraft] = useState<ItemDraft>(emptyDraft);
   const [formError, setFormError] = useState<ApiError | null>(null);
+  const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [authError, setAuthError] = useState<unknown>(null);
 
   useEffect(() => {
     if (formReady) return;
@@ -1687,12 +1679,13 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
 
   const create = useMutation({
     mutationFn: (body: ItemCreate) => createItem(body),
-    onSuccess: (item) => navigate(`/items/${item.id}`),
     onError: (error) => setFormError(asApiError(error, "无法新增物品")),
   });
   useOnUnauth(preset.error);
   useOnUnauth(categoryPreset.error);
   useOnUnauth(create.error);
+  useOnUnauth(authError);
+  const saving = create.isPending || uploading;
 
   async function retryPreset() {
     const result = await preset.refetch();
@@ -1734,10 +1727,34 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
     });
   }
 
-  function onSubmit(event: FormEvent) {
+  async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setFormError(null);
-    create.mutate(itemBody(draft));
+    let item: Item;
+    try {
+      item = await create.mutateAsync(itemBody(draft));
+    } catch {
+      return;
+    }
+    const files = pendingPhotos.slice(0, 20);
+    let lastFail = "";
+    if (files.length > 0) {
+      setUploading(true);
+      for (const file of files) {
+        try {
+          await uploadItemPhoto(String(item.id), file);
+        } catch (error) {
+          setAuthError(error);
+          if (isUnauthenticated(error)) {
+            setUploading(false);
+            return;
+          }
+          lastFail = photoFailureText(error, "无法添加照片");
+        }
+      }
+      setUploading(false);
+    }
+    navigate(`/items/${item.id}`, lastFail ? { state: { notice: lastFail } } : undefined);
   }
 
   if (!formReady) return <Loading />;
@@ -1766,10 +1783,26 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
           </button>
         </div>
       ) : null}
-      <form onSubmit={onSubmit}>
+      <form onSubmit={(event) => void onSubmit(event)}>
         <ItemFields draft={draft} onChange={setDraft} error={formError} extrasOpen={false} />
         <FormIssues error={formError} />
-        <button className={styles.buttonPrimary} type="submit" disabled={create.isPending}>
+        {pendingPhotos.length > 0 ? <p>已选 {pendingPhotos.length} 张</p> : null}
+        {pendingPhotos.length >= 20 ? (
+          <p>一件物品最多 20 张照片</p>
+        ) : (
+          <PhotoAddButtons
+            disabled={saving}
+            remaining={20 - pendingPhotos.length}
+            onFiles={(files) =>
+              setPendingPhotos((current) => {
+                const room = 20 - current.length;
+                if (room <= 0) return current;
+                return [...current, ...files.slice(0, room)];
+              })
+            }
+          />
+        )}
+        <button className={styles.buttonPrimary} type="submit" disabled={saving}>
           保存
         </button>
       </form>
@@ -2322,30 +2355,29 @@ export function ReturnListPage() {
   );
 }
 
-function LocationLinks({ rows }: { rows: Location[] }) {
+function LocationLinks({ rows, enter }: { rows: Location[]; enter?: boolean }) {
   const library = useIconLibrary();
-  return (
-    <ul className={`${styles.list} ${styles.treeList}`}>
-      {rows.map((row) => (
-        <li
-          key={row.id}
-          className={treeDepth(row.path.length) > 0 ? styles.treeChild : undefined}
-          style={treeStyle(row.path.length)}
-        >
-          <Link className={styles.itemLink} to={`/locations/${row.id}`}>
-            <LocationGlyph node={row} library={library.data ?? []} className={styles.rowIcon} />
-            <span className={styles.itemLinkBody}>
-              <span>{row.name}</span>
-              {row.code ? <span className={styles.codeBadge}>{row.code}</span> : null}
-              {row.direct_item_count > 0 ? (
-                <span className={styles.countMuted}>{row.direct_item_count} 件</span>
-              ) : null}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  );
+  const items = rows.map((row) => (
+    <li
+      key={row.id}
+      className={treeDepth(row.path.length) > 0 ? styles.treeChild : undefined}
+      style={treeStyle(row.path.length)}
+    >
+      <Link className={styles.itemLink} to={`/locations/${row.id}`}>
+        <LocationGlyph node={row} library={library.data ?? []} className={styles.rowIcon} />
+        <span className={styles.itemLinkBody}>
+          <span>{row.name}</span>
+          {row.code ? <span className={styles.codeBadge}>{row.code}</span> : null}
+          {row.direct_item_count > 0 ? (
+            <span className={styles.countMuted}>{row.direct_item_count} 件</span>
+          ) : null}
+        </span>
+      </Link>
+    </li>
+  ));
+  const className = `${styles.list} ${styles.treeList}`;
+  if (enter) return <StaggerList className={className}>{items}</StaggerList>;
+  return <ul className={className}>{items}</ul>;
 }
 
 function LocationGroups({ rows }: { rows: Location[] }) {
@@ -2356,13 +2388,13 @@ function LocationGroups({ rows }: { rows: Location[] }) {
       {areas.length > 0 ? (
         <section>
           <h2 className={styles.sectionTitle}>区域</h2>
-          <LocationLinks rows={areas} />
+          <LocationLinks rows={areas} enter />
         </section>
       ) : null}
       {containers.length > 0 ? (
         <section>
           <h2 className={styles.sectionTitle}>尚未放入的容器</h2>
-          <LocationLinks rows={containers} />
+          <LocationLinks rows={containers} enter />
         </section>
       ) : null}
     </>

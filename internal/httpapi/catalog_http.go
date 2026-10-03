@@ -1684,7 +1684,7 @@ func parseItemQuery(r *http.Request) (catalog.ItemFilter, map[string]string) {
 		"limit": {}, "offset": {}, "placement": {}, "location": {},
 		"q": {}, "in_location": {}, "in_location_descendants": {},
 		"category": {}, "category_match": {}, "category_descendants": {},
-		"uncategorized": {},
+		"uncategorized": {}, "sort": {},
 	}
 	for key, vals := range values {
 		if _, ok := allowed[key]; !ok || len(vals) != 1 {
@@ -1822,6 +1822,17 @@ func parseItemQuery(r *http.Request) (catalog.ItemFilter, map[string]string) {
 			keyword = k
 		}
 	}
+	sortName := false
+	if vals, ok := values["sort"]; ok && fields["sort"] == "" {
+		switch vals[0] {
+		case "created_at":
+			sortName = false
+		case "name":
+			sortName = true
+		default:
+			fields["sort"] = "不支持的参数"
+		}
+	}
 	limit := 30
 	if vals, ok := values["limit"]; ok && fields["limit"] == "" {
 		n, good := parseLimit(vals[0])
@@ -1855,6 +1866,7 @@ func parseItemQuery(r *http.Request) (catalog.ItemFilter, map[string]string) {
 		CategoryIDs:           categoryIDs,
 		CategoryMatchAll:      categoryMatchAll,
 		CategoryDescendants:   categoryDescendants,
+		SortName:              sortName,
 		Limit:                 limit,
 		Offset:                offset,
 	}, nil

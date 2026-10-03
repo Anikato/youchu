@@ -533,6 +533,31 @@ a.buttonPrimary {
 .iconLibraryRow input { min-width: 0; width: 100%; }
 .iconLibraryActions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .4rem; min-width: 0; }
 
+.stickySave,
+.stickySaveSpacer {
+  display: none;
+}
+
+.leaveGuard {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: color-mix(in srgb, var(--ink) 40%, transparent);
+}
+
+.leaveGuardPanel {
+  width: 100%;
+  max-width: 22rem;
+  padding: 1.25rem;
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
 @media (min-width: 900px) {
   .list:has(.itemLink) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .treeList { grid-template-columns: none; }
@@ -540,6 +565,21 @@ a.buttonPrimary {
 
 @media (max-width: 640px) {
   .appPage { padding: 1.25rem 1rem calc(6rem + env(safe-area-inset-bottom)); }
+  .formSave { display: none; }
+  .stickySaveSpacer { display: block; height: 4.75rem; }
+  .stickySave {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(3.6rem + env(safe-area-inset-bottom));
+    z-index: 20;
+    padding: 0.6rem 1rem;
+    background: var(--paper-raised);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 20px color-mix(in srgb, var(--ink) 8%, transparent);
+  }
+  .stickySave .buttonPrimary { width: 100%; }
   .header { margin: -1.25rem -1rem 1.5rem; padding: .65rem 1rem; }
   .brand { font-size: 1.4rem; }
   .nav { position: fixed; bottom: 0; left: 0; right: 0; padding: .4rem .5rem calc(.4rem + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--paper-raised); border-top: 1px solid var(--line); box-shadow: 0 -4px 20px color-mix(in srgb, var(--ink) 8%, transparent); }

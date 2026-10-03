@@ -25,6 +25,7 @@ type searchItemsArgs struct {
 	CategoryMatch         string  `json:"category_match,omitempty" jsonschema:"any 或 all"`
 	CategoryDescendants   *int64  `json:"category_descendants,omitempty" jsonschema:"0 仅当前分类，1 含下级"`
 	Uncategorized         *int64  `json:"uncategorized,omitempty" jsonschema:"1 表示未分类"`
+	Sort                  string  `json:"sort,omitempty" jsonschema:"created_at 或 name，省略为按添加时间新到旧"`
 	Limit                 *int64  `json:"limit,omitempty" jsonschema:"每页数量，默认 30，最大 100"`
 	Offset                *int64  `json:"offset,omitempty" jsonschema:"起点，从 0 开始"`
 }
@@ -468,6 +469,17 @@ func itemFilterFromArgs(in searchItemsArgs) (catalog.ItemFilter, map[string]stri
 		}
 	}
 	limit, offset := parsePage(in.Limit, in.Offset, fields)
+	sortName := false
+	if in.Sort != "" {
+		switch in.Sort {
+		case "created_at":
+			sortName = false
+		case "name":
+			sortName = true
+		default:
+			fields["sort"] = "不支持的参数"
+		}
+	}
 	if len(fields) > 0 {
 		return catalog.ItemFilter{}, fields
 	}
@@ -481,6 +493,7 @@ func itemFilterFromArgs(in searchItemsArgs) (catalog.ItemFilter, map[string]stri
 		CategoryIDs:           categoryIDs,
 		CategoryMatchAll:      categoryMatchAll,
 		CategoryDescendants:   categoryDescendants,
+		SortName:              sortName,
 		Limit:                 limit,
 		Offset:                offset,
 	}, nil

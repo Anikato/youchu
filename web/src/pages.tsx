@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useEffect, useState, type CSSProperties } from "react";
+import { FormEvent, useEffect, useRef, useState, type CSSProperties, type Ref } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ApiError,
@@ -70,8 +70,13 @@ import {
 } from "./api";
 import { clampPageOffset, readItemList, writeItemList, type ItemListState } from "./filters";
 import { ICON_GROUPS, CustomSVG, LocationGlyph, defaultIconLabel } from "./icons";
+import { LeaveGuard } from "./leaveGuard";
 import { PageEnter, StaggerList } from "./motion";
+import { PendingPhotos } from "./pendingPhotos";
 import { PhotoAddButtons } from "./photos";
+import { readLastCategoryIds, readLastLocationId, rememberItemPlacement } from "./prefs";
+import { formatAddedAt } from "./relativeTime";
+import { StickySave, saveButtonLabel } from "./stickySave";
 import styles from "./styles.module.css";
 import { type Accent, type Theme, readAccent, readTheme, setAccent, setTheme } from "./theme";
 
@@ -523,6 +528,7 @@ function TextField({
   error,
   multiline,
   hint,
+  inputRef,
 }: {
   label: string;
   name: string;
@@ -531,6 +537,7 @@ function TextField({
   error?: string;
   multiline?: boolean;
   hint?: string;
+  inputRef?: Ref<HTMLInputElement>;
 }) {
   return (
     <label className={styles.field}>
@@ -539,11 +546,23 @@ function TextField({
       {multiline ? (
         <textarea name={name} value={value} autoComplete="off" onChange={(event) => onChange(event.target.value)} />
       ) : (
-        <input name={name} value={value} autoComplete="off" onChange={(event) => onChange(event.target.value)} />
+        <input
+          ref={inputRef}
+          name={name}
+          value={value}
+          autoComplete="off"
+          onChange={(event) => onChange(event.target.value)}
+        />
       )}
       {error ? <span className={styles.error}>{error}</span> : null}
     </label>
   );
+}
+
+function scrollToFormError() {
+  requestAnimationFrame(() => {
+    document.querySelector(`.${styles.error}`)?.scrollIntoView({ block: "center" });
+  });
 }
 
 function Pager({
@@ -713,6 +732,7 @@ function ItemPhotoSection({ itemId, photos, readOnly }: { itemId: string; photos
   const [errorMessage, setErrorMessage] = useState("");
   const [authError, setAuthError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [uploadLabel, setUploadLabel] = useState("");
   const [pendingDelete, setPendingDelete] = useState<{ id: number; version: number } | null>(null);
   const selected = ordered.find((photo) => photo.id === selectedId) ?? null;
 
@@ -777,7 +797,9 @@ function ItemPhotoSection({ itemId, photos, readOnly }: { itemId: string; photos
     setNotice("");
     setErrorMessage("");
     let lastFail = "";
-    for (const file of fileList) {
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      setUploadLabel(`上传 ${i + 1}/${fileList.length}`);
       try {
         await uploadItemPhoto(itemId, file);
         await afterWrite();
@@ -799,6 +821,7 @@ function ItemPhotoSection({ itemId, photos, readOnly }: { itemId: string; photos
       }
     }
     if (lastFail) setErrorMessage(lastFail);
+    setUploadLabel("");
     setBusy(false);
   }
 
@@ -872,6 +895,7 @@ function ItemPhotoSection({ itemId, photos, readOnly }: { itemId: string; photos
     <section>
       <h2 className={styles.sectionTitle}>照片</h2>
       {notice ? <p>{notice}</p> : null}
+      {uploadLabel ? <p>{uploadLabel}</p> : null}
       {errorMessage ? <p className={styles.error}>{errorMessage}</p> : null}
       {selected ? (
         <img className={styles.photoOriginal} src={`/api/v1/photos/${selected.id}/original`} alt="" />
@@ -1205,11 +1229,13 @@ function ItemFields({
   onChange,
   error,
   extrasOpen,
+  nameRef,
 }: {
   draft: ItemDraft;
   onChange: (draft: ItemDraft) => void;
   error: ApiError | null;
   extrasOpen: boolean;
+  nameRef?: Ref<HTMLInputElement>;
 }) {
   // React 19 types omit defaultOpen on <details>; seed once so open={extrasOpen} cannot trap it.
   const [extrasShown, setExtrasShown] = useState(extrasOpen);
@@ -1218,7 +1244,14 @@ function ItemFields({
   }
   return (
     <>
-      <TextField label="名称" name="name" value={draft.name} onChange={(value) => set("name", value)} error={fieldText(error, "name")} />
+      <TextField
+        label="名称"
+        name="name"
+        value={draft.name}
+        onChange={(value) => set("name", value)}
+        error={fieldText(error, "name")}
+        inputRef={nameRef}
+      />
       <ItemLocationsField links={draft.locations} onChange={(locations) => set("locations", locations)} error={fieldText(error, "locations")} />
       <ItemCategoriesField
         links={draft.categories}
@@ -1287,6 +1320,7 @@ const emptyItemList: ItemListState = {
   matchAll: false,
   categorySelf: false,
   uncategorized: false,
+  sort: "created_at",
   offset: "",
 };
 
@@ -1404,6 +1438,17 @@ export function ItemListPage() {
           只看待定位
         </button>
       )}
+      <label className={styles.field}>
+        排序
+        <select
+          name="sort"
+          value={view.sort}
+          onChange={(event) => applyFilters({ sort: event.target.value === "name" ? "name" : "created_at" })}
+        >
+          <option value="created_at">最新在前</option>
+          <option value="name">按名称</option>
+        </select>
+      </label>
       <details className={styles.filters}>
         <summary>筛选</summary>
         <label className={styles.field}>
@@ -1615,6 +1660,7 @@ export function ItemListPage() {
                       <LocationPathLine key={link.location_id} path={link.path} />
                     ))
                   )}
+                  <span className={styles.meta}>{formatAddedAt(item.created_at)}</span>
                 </span>
               </Link>
             </li>
@@ -1652,7 +1698,7 @@ export function ItemCreatePage() {
 }
 
 function ItemCreateForm({ locationParam, categoryParam }: { locationParam: string; categoryParam: string }) {
-  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const hasLocationPreset = locationParam !== "";
   const hasCategoryPreset = categoryParam !== "";
   const hasPreset = hasLocationPreset || hasCategoryPreset;
@@ -1675,7 +1721,23 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
   const [formError, setFormError] = useState<ApiError | null>(null);
   const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadIndex, setUploadIndex] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
   const [authError, setAuthError] = useState<unknown>(null);
+  const [saveNotice, setSaveNotice] = useState<{ id: number; name: string; photoFail: boolean } | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const appliedLast = useRef(false);
+  const locationsQuery = useQuery({
+    queryKey: ["locations", "flat"],
+    queryFn: () => fetchAllLocations(new URLSearchParams({ flat: "1" })),
+    retry: false,
+  });
+  const categoriesQuery = useQuery({
+    queryKey: ["categories", "flat"],
+    queryFn: () => fetchAllCategories(new URLSearchParams({ flat: "1" })),
+    retry: false,
+  });
 
   useEffect(() => {
     if (formReady) return;
@@ -1726,12 +1788,59 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
     categoryPreset.data,
   ]);
 
+  useEffect(() => {
+    if (!formReady || appliedLast.current) return;
+    if (locationsQuery.isLoading || categoriesQuery.isLoading) return;
+    appliedLast.current = true;
+    setDraft((current) => {
+      let next = current;
+      if (!hasLocationPreset && next.locations.length === 0) {
+        const lastId = readLastLocationId();
+        const loc = locationsQuery.data?.find((item) => item.id === lastId);
+        if (loc) {
+          next = {
+            ...next,
+            locations: [{ location_id: loc.id, note: null, path: loc.path.map((node) => ({ ...node })) }],
+          };
+        }
+      }
+      if (!hasCategoryPreset && next.categories.length === 0) {
+        const lastIds = new Set(readLastCategoryIds());
+        const cats = (categoriesQuery.data ?? []).filter((cat) => lastIds.has(cat.id));
+        if (cats.length > 0) {
+          next = {
+            ...next,
+            categories: cats.map((cat) => ({
+              category_id: cat.id,
+              source: "human",
+              path: cat.path.map((node) => ({ ...node })),
+            })),
+          };
+        }
+      }
+      return next;
+    });
+  }, [
+    formReady,
+    hasLocationPreset,
+    hasCategoryPreset,
+    locationsQuery.isLoading,
+    categoriesQuery.isLoading,
+    locationsQuery.data,
+    categoriesQuery.data,
+  ]);
+
   const create = useMutation({
     mutationFn: (body: ItemCreate) => createItem(body),
-    onError: (error) => setFormError(asApiError(error, "无法新增物品")),
+    onError: (error) => {
+      setFormError(asApiError(error, "无法新增物品"));
+      scrollToFormError();
+    },
   });
   useOnUnauth(preset.error);
   useOnUnauth(categoryPreset.error);
+  useOnUnauth(locationsQuery.error);
+  useOnUnauth(categoriesQuery.error);
   useOnUnauth(create.error);
   useOnUnauth(authError);
   const saving = create.isPending || uploading;
@@ -1780,38 +1889,66 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
     event.preventDefault();
     if (saving) return;
     setFormError(null);
+    setSaveNotice(null);
+    const savedName = draft.name;
+    const savedLocations = draft.locations.map((link) => link.location_id);
+    const savedCategories = draft.categories.map((link) => link.category_id);
     let item: Item;
     try {
       item = await create.mutateAsync(itemBody(draft));
     } catch {
       return;
     }
+    rememberItemPlacement(savedLocations, savedCategories);
     const files = pendingPhotos.slice(0, 20);
-    let lastFail = "";
+    let photoFail = false;
     if (files.length > 0) {
       setUploading(true);
-      for (const file of files) {
+      setUploadTotal(files.length);
+      for (let i = 0; i < files.length; i++) {
+        setUploadIndex(i + 1);
         try {
-          await uploadItemPhoto(String(item.id), file);
+          await uploadItemPhoto(String(item.id), files[i]);
         } catch (error) {
           setAuthError(error);
           if (isUnauthenticated(error)) {
             setUploading(false);
+            setUploadTotal(0);
             return;
           }
-          lastFail = photoFailureText(error, "无法添加照片");
+          photoFail = true;
         }
       }
       setUploading(false);
+      setUploadTotal(0);
     }
-    navigate(`/items/${item.id}`, lastFail ? { state: { notice: lastFail } } : undefined);
+    void queryClient.invalidateQueries({ queryKey: ["items"] });
+    setPendingPhotos([]);
+    setDraft((current) => ({ ...current, name: "", alias: "", model: "", spec: "", quantityNote: "", note: "" }));
+    setSaveNotice({ id: item.id, name: savedName, photoFail });
+    setJustSaved(true);
+    window.setTimeout(() => setJustSaved(false), 1500);
+    nameRef.current?.focus();
   }
 
   if (!formReady) return <Loading />;
 
+  const saveLabel = saveButtonLabel(saving, uploadIndex, uploadTotal, justSaved);
+  const barError = formError && !fieldText(formError, "name") && !fieldText(formError, "locations") && !fieldText(formError, "categories")
+    ? formError.message
+    : fieldText(formError, "name") || fieldText(formError, "locations") || fieldText(formError, "categories") || undefined;
+
   return (
     <>
+      <LeaveGuard dirty={draft.name.trim() !== "" || pendingPhotos.length > 0} />
       <h1 className={styles.title}>新增物品</h1>
+      {saveNotice ? (
+        <p>
+          已保存：
+          <Link to={`/items/${saveNotice.id}`}>{saveNotice.name}</Link>
+          {saveNotice.photoFail ? "，有照片没传上" : null}
+        </p>
+      ) : null}
       {hasLocationPreset && preset.isError ? (
         <div>
           <p className={styles.error}>{messageOf(preset.error, "无法读取位置")}</p>
@@ -1833,9 +1970,10 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
           </button>
         </div>
       ) : null}
-      <form onSubmit={(event) => void onSubmit(event)}>
-        <ItemFields draft={draft} onChange={setDraft} error={formError} extrasOpen={false} />
+      <form id="item-save-form" onSubmit={(event) => void onSubmit(event)}>
+        <ItemFields draft={draft} onChange={setDraft} error={formError} extrasOpen={false} nameRef={nameRef} />
         <FormIssues error={formError} />
+        <PendingPhotos files={pendingPhotos} onRemove={(index) => setPendingPhotos((current) => current.filter((_, i) => i !== index))} />
         {pendingPhotos.length > 0 ? <p>已选 {pendingPhotos.length} 张</p> : null}
         {pendingPhotos.length >= 20 ? (
           <p>一件物品最多 20 张照片</p>
@@ -1852,10 +1990,12 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
             }
           />
         )}
-        <button className={styles.buttonPrimary} type="submit" disabled={saving}>
-          保存
+        <button className={`${styles.buttonPrimary} ${styles.formSave}`} type="submit" disabled={saving}>
+          {saveLabel}
         </button>
       </form>
+      <div className={styles.stickySaveSpacer} />
+      <StickySave form="item-save-form" disabled={saving} label={saveLabel} error={barError} />
     </>
   );
 }
@@ -2000,6 +2140,10 @@ function ItemEditForm({ id }: { id: string }) {
   const [latestError, setLatestError] = useState("");
   const [loadingLatest, setLoadingLatest] = useState(false);
   const [formError, setFormError] = useState<ApiError | null>(null);
+  const [saveNotice, setSaveNotice] = useState("");
+  const [justSaved, setJustSaved] = useState(false);
+  const [baseline, setBaseline] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
   const [confirming, setConfirming] = useState(false);
   const [deleteError, setDeleteError] = useState<ApiError | null>(null);
   const [originalCategoryIds, setOriginalCategoryIds] = useState<number[]>([]);
@@ -2014,14 +2158,18 @@ function ItemEditForm({ id }: { id: string }) {
 
   useEffect(() => {
     if (formReady || !recordReady || !query.data) return;
-    setDraft(draftFromItem(query.data));
+    const nextDraft = draftFromItem(query.data);
+    setDraft(nextDraft);
+    setBaseline(JSON.stringify(nextDraft));
     setVersion(query.data.version);
     setOriginalCategoryIds(categoryIdsOf(query.data.categories));
     setFormReady(true);
   }, [formReady, recordReady, query.data]);
 
   function applyServer(next: Item) {
-    setDraft(draftFromItem(next));
+    const nextDraft = draftFromItem(next);
+    setDraft(nextDraft);
+    setBaseline(JSON.stringify(nextDraft));
     setVersion(next.version);
     setOriginalCategoryIds(categoryIdsOf(next.categories));
     setConflict(false);
@@ -2033,6 +2181,9 @@ function ItemEditForm({ id }: { id: string }) {
       queryClient.setQueryData(["item", id], next);
       applyServer(next);
       setFormError(null);
+      setSaveNotice("已保存");
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 1500);
     },
     onError: (error) => {
       if (isNotFound(error)) {
@@ -2045,6 +2196,7 @@ function ItemEditForm({ id }: { id: string }) {
         return;
       }
       setFormError(asApiError(error, "无法保存物品"));
+      scrollToFormError();
     },
   });
   const remove = useMutation({
@@ -2173,20 +2325,29 @@ function ItemEditForm({ id }: { id: string }) {
   }
 
   const extrasOpen = [draft.alias, draft.model, draft.spec, draft.quantityNote, draft.note].some((v) => v !== "");
+  const saveLabel = saveButtonLabel(save.isPending, 0, 0, justSaved);
+  const barError =
+    formError && !fieldText(formError, "name") && !fieldText(formError, "locations") && !fieldText(formError, "categories")
+      ? formError.message
+      : fieldText(formError, "name") || fieldText(formError, "locations") || fieldText(formError, "categories") || undefined;
 
   return (
     <>
+      <LeaveGuard dirty={JSON.stringify(draft) !== baseline} />
       <h1 className={styles.title}>{draft.name}</h1>
-      <form onSubmit={onSubmit}>
-        <ItemFields draft={draft} onChange={setDraft} error={formError} extrasOpen={extrasOpen} />
+      {saveNotice ? <p>{saveNotice}</p> : null}
+      <form id="item-save-form" onSubmit={onSubmit}>
+        <ItemFields draft={draft} onChange={setDraft} error={formError} extrasOpen={extrasOpen} nameRef={nameRef} />
         <FormIssues error={formError} />
         {conflict ? (
           <ConflictNotice message={conflictMessage} pending={loadingLatest} onLoad={() => void loadLatest()} error={latestError} />
         ) : null}
-        <button className={styles.buttonPrimary} type="submit" disabled={save.isPending}>
-          保存
+        <button className={`${styles.buttonPrimary} ${styles.formSave}`} type="submit" disabled={save.isPending}>
+          {saveLabel}
         </button>
       </form>
+      <div className={styles.stickySaveSpacer} />
+      <StickySave form="item-save-form" disabled={save.isPending} label={saveLabel} error={barError} />
       <ItemPhotoSection itemId={id} photos={query.data?.photos ?? []} />
       <section>
         <h2 className={styles.sectionTitle}>待归位事项</h2>

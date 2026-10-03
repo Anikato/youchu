@@ -93,6 +93,7 @@ type ItemFilter struct {
 	CategoryIDs           []int64
 	CategoryMatchAll      bool
 	CategoryDescendants   bool
+	SortName              bool
 	Limit                 int
 	Offset                int
 }
@@ -825,7 +826,10 @@ func likePattern(q string) string {
 }
 
 func itemListSQL(f ItemFilter) (countSQL, pageSQL string, args []any) {
-	const order = ` ORDER BY name, id LIMIT ? OFFSET ?`
+	order := ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+	if f.SortName {
+		order = ` ORDER BY name, id LIMIT ? OFFSET ?`
+	}
 	conds := []string{`deleted_at IS NULL`}
 	if f.Unlocated {
 		conds = append(conds, `NOT EXISTS (SELECT 1 FROM item_locations WHERE item_locations.item_id = items.id)`)

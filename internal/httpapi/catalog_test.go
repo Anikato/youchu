@@ -2621,8 +2621,8 @@ func TestItemListOrder(t *testing.T) {
 	if page.Total != 31 || page.Limit != 30 || page.Offset != 0 || len(page.Data) != 30 {
 		t.Fatalf("first page=%+v len=%d", page, len(page.Data))
 	}
-	if page.Data[0].ID != ids[0] || page.Data[29].ID != ids[29] {
-		t.Fatalf("page ids=%d..%d want %d..%d", page.Data[0].ID, page.Data[29].ID, ids[0], ids[29])
+	if page.Data[0].ID != ids[30] || page.Data[29].ID != ids[1] {
+		t.Fatalf("page ids=%d..%d want %d..%d", page.Data[0].ID, page.Data[29].ID, ids[30], ids[1])
 	}
 	for _, item := range page.Data {
 		if item.Locations == nil || len(item.Locations) != 0 {
@@ -2630,7 +2630,7 @@ func TestItemListOrder(t *testing.T) {
 		}
 	}
 	last := mustItemPage(t, getItem(h, cookie, "/api/v1/items?offset=30"))
-	if last.Total != 31 || last.Limit != 30 || last.Offset != 30 || len(last.Data) != 1 || last.Data[0].ID != ids[30] {
+	if last.Total != 31 || last.Limit != 30 || last.Offset != 30 || len(last.Data) != 1 || last.Data[0].ID != ids[0] {
 		t.Fatalf("offset 30=%+v", last)
 	}
 	past := mustItemPage(t, getItem(h, cookie, "/api/v1/items?offset=31"))
@@ -2641,6 +2641,34 @@ func TestItemListOrder(t *testing.T) {
 	if !strings.Contains(pastRec.Body.String(), `"data":[]`) {
 		t.Fatalf("past body=%s", pastRec.Body.String())
 	}
+}
+
+func TestItemListSort(t *testing.T) {
+	_, h, _ := testHandler(t, false)
+	cookie := login(t, h)
+	older := mustItem(t, h, cookie, `{"name":"乙"}`)
+	newer := mustItem(t, h, cookie, `{"name":"甲"}`)
+	if newer.ID <= older.ID {
+		t.Fatalf("ids older=%d newer=%d", older.ID, newer.ID)
+	}
+
+	def := mustItemPage(t, getItem(h, cookie, "/api/v1/items"))
+	if def.Total != 2 || def.Data[0].ID != newer.ID || def.Data[1].ID != older.ID {
+		t.Fatalf("default=%+v", def)
+	}
+	byTime := mustItemPage(t, getItem(h, cookie, "/api/v1/items?sort=created_at"))
+	if byTime.Data[0].ID != newer.ID || byTime.Data[1].ID != older.ID {
+		t.Fatalf("created_at=%+v", byTime)
+	}
+	byName := mustItemPage(t, getItem(h, cookie, "/api/v1/items?sort=name"))
+	if byName.Data[0].ID != older.ID || byName.Data[0].Name != "乙" || byName.Data[1].Name != "甲" {
+		t.Fatalf("name=%+v", byName)
+	}
+
+	rec := getItem(h, cookie, "/api/v1/items?sort=updated_at")
+	assertInvalidFields(t, rec, map[string]string{"sort": "不支持的参数"})
+	rec = getItem(h, cookie, "/api/v1/items?sort=created_at&sort=name")
+	assertInvalidFields(t, rec, map[string]string{"sort": "不支持的参数"})
 }
 
 func assertLinkNoteNull(t *testing.T, body string) {

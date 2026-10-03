@@ -1,3 +1,5 @@
+export type ItemListSort = "created_at" | "name";
+
 export type ItemListState = {
   q: string;
   unlocated: boolean;
@@ -7,6 +9,7 @@ export type ItemListState = {
   matchAll: boolean;
   categorySelf: boolean;
   uncategorized: boolean;
+  sort: ItemListSort;
   offset: string;
 };
 
@@ -22,6 +25,7 @@ export function readItemList(params: URLSearchParams): ItemListState {
     matchAll: params.get("category_match") === "all",
     categorySelf: params.get("category_descendants") === "0",
     uncategorized: params.get("uncategorized") === "1",
+    sort: params.get("sort") === "name" ? "name" : "created_at",
     offset: params.get("offset") ?? "",
   };
 }
@@ -65,6 +69,7 @@ export function writeItemList(state: ItemListState): URLSearchParams {
     if (next.matchAll) params.set("category_match", "all");
     if (next.categorySelf) params.set("category_descendants", "0");
   }
+  if (next.sort === "name") params.set("sort", "name");
   if (next.offset !== "" && next.offset !== "0") params.set("offset", next.offset);
   return params;
 }

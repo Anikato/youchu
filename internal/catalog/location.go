@@ -26,6 +26,7 @@ type CreateInput struct {
 	Code   OptionalText
 	Parent OptionalID
 	Icon   OptionalText
+	Custom OptionalID
 }
 
 type UpdateInput struct {
@@ -34,6 +35,7 @@ type UpdateInput struct {
 	Code           OptionalText
 	Parent         OptionalID
 	Icon           OptionalText
+	Custom         OptionalID
 	VersionPresent bool
 	Version        int64
 }
@@ -45,6 +47,7 @@ type Location struct {
 	Code            *string
 	ParentID        *int64
 	Icon            *string
+	CustomIconID    *int64
 	Version         int64
 	CreatedAt       string
 	UpdatedAt       string
@@ -53,11 +56,12 @@ type Location struct {
 }
 
 type PathNode struct {
-	ID   int64
-	Name string
-	Type string
-	Code *string
-	Icon *string
+	ID           int64
+	Name         string
+	Type         string
+	Code         *string
+	Icon         *string
+	CustomIconID *int64
 }
 
 type ListKind int
@@ -86,12 +90,12 @@ type ListResult struct {
 	Offset    int
 }
 
-const locationCols = `id, name, type, code, parent_id, icon, version, created_at, updated_at`
+const locationCols = `id, name, type, code, parent_id, icon, custom_icon_id, version, created_at, updated_at`
 
 const siblingOrder = `CASE type WHEN 'area' THEN 0 WHEN 'fixed' THEN 1 ELSE 2 END, code IS NULL, code, name, id`
 
 func CreateLocation(ctx context.Context, db *sql.DB, now time.Time, in CreateInput) (Location, error) {
-	name, typ, code, parentID, hasParent, icon, err := validateCreate(in)
+	name, typ, code, parentID, hasParent, icon, custom, err := validateCreate(in)
 	if err != nil {
 		return Location{}, err
 	}
@@ -110,6 +114,11 @@ func CreateLocation(ctx context.Context, db *sql.DB, now time.Time, in CreateInp
 				return ErrParent
 			}
 		}
+		if custom != nil {
+			if err := ensureCustomIcon(ctx, conn, *custom); err != nil {
+				return err
+			}
+		}
 		ts := now.UTC().Format(time.RFC3339Nano)
 		var codeArg any
 		if code != "" {
@@ -123,9 +132,13 @@ func CreateLocation(ctx context.Context, db *sql.DB, now time.Time, in CreateInp
 		if icon != nil {
 			iconArg = *icon
 		}
+		var customArg any
+		if custom != nil {
+			customArg = *custom
+		}
 		res, err := conn.ExecContext(ctx, `
-INSERT INTO locations (name, type, code, parent_id, icon, version, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, 1, ?, ?)`, name, typ, codeArg, parentArg, iconArg, ts, ts)
+INSERT INTO locations (name, type, code, parent_id, icon, custom_icon_id, version, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`, name, typ, codeArg, parentArg, iconArg, customArg, ts, ts)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 				return ErrCodeTaken
@@ -152,11 +165,16 @@ func UpdateLocation(ctx context.Context, db *sql.DB, now time.Time, id int64, in
 		if err != nil {
 			return err
 		}
-		name, code, parent, icon, err := resolveUpdate(ctx, conn, loc, in)
+		name, code, parent, icon, custom, err := resolveUpdate(ctx, conn, loc, in)
 		if err != nil {
 			return err
 		}
-		var codeArg, parentArg, iconArg any
+		if custom != nil {
+			if err := ensureCustomIcon(ctx, conn, *custom); err != nil {
+				return err
+			}
+		}
+		var codeArg, parentArg, iconArg, customArg any
 		if code != nil {
 			codeArg = *code
 		}
@@ -166,11 +184,14 @@ func UpdateLocation(ctx context.Context, db *sql.DB, now time.Time, id int64, in
 		if icon != nil {
 			iconArg = *icon
 		}
+		if custom != nil {
+			customArg = *custom
+		}
 		ts := now.UTC().Format(time.RFC3339Nano)
 		res, err := conn.ExecContext(ctx, `
 UPDATE locations
-SET name = ?, code = ?, parent_id = ?, icon = ?, version = version + 1, updated_at = ?
-WHERE id = ? AND version = ?`, name, codeArg, parentArg, iconArg, ts, id, loc.Version)
+SET name = ?, code = ?, parent_id = ?, icon = ?, custom_icon_id = ?, version = version + 1, updated_at = ?
+WHERE id = ? AND version = ?`, name, codeArg, parentArg, iconArg, customArg, ts, id, loc.Version)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 				return ErrCodeTaken
@@ -231,7 +252,7 @@ func DeleteLocation(ctx context.Context, db *sql.DB, id, version int64) error {
 	})
 }
 
-func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateInput) (string, *string, *int64, *string, error) {
+func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateInput) (string, *string, *int64, *string, *int64, error) {
 	fields := map[string]string{}
 	if !in.VersionPresent || in.Version < 1 {
 		fields["version"] = "版本不正确"
@@ -239,7 +260,7 @@ func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateI
 	if in.Type.Present {
 		fields["type"] = "类型不能修改"
 	}
-	if !in.Name.Present && !in.Code.Present && !in.Parent.Present && !in.Icon.Present {
+	if !in.Name.Present && !in.Code.Present && !in.Parent.Present && !in.Icon.Present && !in.Custom.Present {
 		fields["request"] = "没有要修改的内容"
 	}
 	name := loc.Name
@@ -269,19 +290,47 @@ func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateI
 		fields["parent_id"] = "请选择父级"
 	}
 	icon := loc.Icon
-	if in.Icon.Present {
+	custom := loc.CustomIconID
+	if in.Icon.Present && in.Custom.Present {
+		nextIcon, iconMsg := parseLocationIcon(in.Icon)
+		nextCustom, customMsg := parseCustomIcon(in.Custom)
+		if iconMsg != "" {
+			fields["icon"] = iconMsg
+		}
+		if customMsg != "" {
+			fields["custom_icon_id"] = customMsg
+		}
+		if nextIcon != nil && nextCustom != nil {
+			fields["icon"] = "不能同时选用内置和自传图标"
+			fields["custom_icon_id"] = "不能同时选用内置和自传图标"
+		} else {
+			icon = nextIcon
+			custom = nextCustom
+		}
+	} else if in.Icon.Present {
 		next, msg := parseLocationIcon(in.Icon)
 		if msg != "" {
 			fields["icon"] = msg
 		} else {
 			icon = next
+			custom = nil
+		}
+	} else if in.Custom.Present {
+		next, msg := parseCustomIcon(in.Custom)
+		if msg != "" {
+			fields["custom_icon_id"] = msg
+		} else {
+			custom = next
+			if next != nil {
+				icon = nil
+			}
 		}
 	}
 	if err := fieldError(fields); err != nil {
-		return "", nil, nil, nil, err
+		return "", nil, nil, nil, nil, err
 	}
 	if in.Version != loc.Version {
-		return "", nil, nil, nil, ErrVersion
+		return "", nil, nil, nil, nil, ErrVersion
 	}
 	parent := loc.ParentID
 	if in.Parent.Present {
@@ -289,13 +338,13 @@ func resolveUpdate(ctx context.Context, conn *sql.Conn, loc Location, in UpdateI
 			parent = nil
 		} else {
 			if err := ensureParent(ctx, conn, loc, in.Parent.Value); err != nil {
-				return "", nil, nil, nil, err
+				return "", nil, nil, nil, nil, err
 			}
 			id := in.Parent.Value
 			parent = &id
 		}
 	}
-	return name, code, parent, icon, nil
+	return name, code, parent, icon, custom, nil
 }
 
 func codeForUpdate(typ string, code OptionalText) (*string, string) {
@@ -453,7 +502,7 @@ func ListLocations(ctx context.Context, db *sql.DB, f ListFilter) (ListResult, e
 	return result, nil
 }
 
-func validateCreate(in CreateInput) (name, typ, code string, parentID int64, hasParent bool, icon *string, err error) {
+func validateCreate(in CreateInput) (name, typ, code string, parentID int64, hasParent bool, icon *string, custom *int64, err error) {
 	fields := map[string]string{}
 	if !in.Name.Present || in.Name.Null {
 		fields["name"] = "请填写名称"
@@ -492,7 +541,19 @@ func validateCreate(in CreateInput) (name, typ, code string, parentID int64, has
 			icon = next
 		}
 	}
-	return name, typ, code, parentID, hasParent, icon, fieldError(fields)
+	if in.Custom.Present {
+		next, msg := parseCustomIcon(in.Custom)
+		if msg != "" {
+			fields["custom_icon_id"] = msg
+		} else {
+			custom = next
+		}
+	}
+	if icon != nil && custom != nil {
+		fields["icon"] = "不能同时选用内置和自传图标"
+		fields["custom_icon_id"] = "不能同时选用内置和自传图标"
+	}
+	return name, typ, code, parentID, hasParent, icon, custom, fieldError(fields)
 }
 
 // Length, internal whitespace, and control characters do not need a valid type.
@@ -608,7 +669,8 @@ func scanLocation(sc rowScanner) (Location, error) {
 	var code sql.NullString
 	var parent sql.NullInt64
 	var icon sql.NullString
-	if err := sc.Scan(&loc.ID, &loc.Name, &loc.Type, &code, &parent, &icon, &loc.Version, &loc.CreatedAt, &loc.UpdatedAt); err != nil {
+	var custom sql.NullInt64
+	if err := sc.Scan(&loc.ID, &loc.Name, &loc.Type, &code, &parent, &icon, &custom, &loc.Version, &loc.CreatedAt, &loc.UpdatedAt); err != nil {
 		return Location{}, err
 	}
 	if code.Valid {
@@ -622,6 +684,10 @@ func scanLocation(sc rowScanner) (Location, error) {
 	if icon.Valid {
 		s := icon.String
 		loc.Icon = &s
+	}
+	if custom.Valid {
+		id := custom.Int64
+		loc.CustomIconID = &id
 	}
 	return loc, nil
 }
@@ -638,8 +704,9 @@ func loadPath(ctx context.Context, conn *sql.Conn, id int64) ([]PathNode, error)
 		var code sql.NullString
 		var parent sql.NullInt64
 		var icon sql.NullString
-		err := conn.QueryRowContext(ctx, `SELECT id, name, type, code, parent_id, icon FROM locations WHERE id = ?`, id).
-			Scan(&node.ID, &node.Name, &node.Type, &code, &parent, &icon)
+		var custom sql.NullInt64
+		err := conn.QueryRowContext(ctx, `SELECT id, name, type, code, parent_id, icon, custom_icon_id FROM locations WHERE id = ?`, id).
+			Scan(&node.ID, &node.Name, &node.Type, &code, &parent, &icon, &custom)
 		if err != nil {
 			return nil, err
 		}
@@ -650,6 +717,10 @@ func loadPath(ctx context.Context, conn *sql.Conn, id int64) ([]PathNode, error)
 		if icon.Valid {
 			s := icon.String
 			node.Icon = &s
+		}
+		if custom.Valid {
+			cid := custom.Int64
+			node.CustomIconID = &cid
 		}
 		chain = append(chain, node)
 		if !parent.Valid {

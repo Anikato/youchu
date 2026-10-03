@@ -48,18 +48,34 @@ type updateItemArgs struct {
 }
 
 type createLocationArgs struct {
-	Name     string  `json:"name" jsonschema:"位置名称"`
-	Type     string  `json:"type" jsonschema:"area、fixed 或 movable"`
-	Code     *string `json:"code,omitempty" jsonschema:"编号"`
-	ParentID *int64  `json:"parent_id,omitempty" jsonschema:"父级位置 id"`
+	Name         string  `json:"name" jsonschema:"位置名称"`
+	Type         string  `json:"type" jsonschema:"area、fixed 或 movable"`
+	Code         *string `json:"code,omitempty" jsonschema:"编号"`
+	ParentID     *int64  `json:"parent_id,omitempty" jsonschema:"父级位置 id"`
+	Icon         *string `json:"icon,omitempty" jsonschema:"内置图标短名"`
+	CustomIconID *int64  `json:"custom_icon_id,omitempty" jsonschema:"自传图标 id"`
 }
 
 type updateLocationArgs struct {
-	ID       int64           `json:"id" jsonschema:"位置 id"`
-	Version  int64           `json:"version" jsonschema:"版本"`
-	Name     *string         `json:"name,omitempty" jsonschema:"位置名称"`
-	Code     *string         `json:"code,omitempty" jsonschema:"编号"`
-	ParentID json.RawMessage `json:"parent_id,omitempty" jsonschema:"父级位置 id，省略则不变，null 表示移到根级"`
+	ID           int64           `json:"id" jsonschema:"位置 id"`
+	Version      int64           `json:"version" jsonschema:"版本"`
+	Name         *string         `json:"name,omitempty" jsonschema:"位置名称"`
+	Code         *string         `json:"code,omitempty" jsonschema:"编号"`
+	ParentID     json.RawMessage `json:"parent_id,omitempty" jsonschema:"父级位置 id，省略则不变，null 表示移到根级"`
+	Icon         json.RawMessage `json:"icon,omitempty" jsonschema:"内置图标短名，null 表示改回类型默认"`
+	CustomIconID json.RawMessage `json:"custom_icon_id,omitempty" jsonschema:"自传图标 id"`
+}
+
+type createLocationIconArgs struct {
+	Name string `json:"name" jsonschema:"图标名称"`
+	SVG  string `json:"svg" jsonschema:"SVG 文本"`
+}
+
+type updateLocationIconArgs struct {
+	ID      int64   `json:"id" jsonschema:"图标 id"`
+	Version int64   `json:"version" jsonschema:"版本"`
+	Name    *string `json:"name,omitempty" jsonschema:"图标名称"`
+	SVG     *string `json:"svg,omitempty" jsonschema:"SVG 文本"`
 }
 
 type updateCategoryArgs struct {
@@ -101,8 +117,23 @@ func (s *Server) registerWriteTools(mcpServer *sdk.Server) {
 		Name:        "youchu_update_location",
 		Description: "编辑位置。与 PATCH /api/v1/locations/{id} 相同。",
 		Annotations: writeAnnotations,
-		InputSchema: parentIDInputSchema[updateLocationArgs](),
+		InputSchema: locationUpdateInputSchema(),
 	}, s.updateLocation)
+	sdk.AddTool(mcpServer, &sdk.Tool{
+		Name:        "youchu_create_location_icon",
+		Description: "上传位置自传 SVG 图标。与 POST /api/v1/location-icons 相同。",
+		Annotations: writeAnnotations,
+	}, s.createLocationIcon)
+	sdk.AddTool(mcpServer, &sdk.Tool{
+		Name:        "youchu_update_location_icon",
+		Description: "改名或替换位置自传 SVG 图标。与 PATCH /api/v1/location-icons/{id} 相同。",
+		Annotations: writeAnnotations,
+	}, s.updateLocationIcon)
+	sdk.AddTool(mcpServer, &sdk.Tool{
+		Name:        "youchu_delete_location_icon",
+		Description: "删除未被位置使用的自传图标。与 DELETE /api/v1/location-icons/{id} 相同。",
+		Annotations: writeAnnotations,
+	}, s.deleteLocationIcon)
 	sdk.AddTool(mcpServer, &sdk.Tool{
 		Name:        "youchu_update_category",
 		Description: "编辑分类。与 PATCH /api/v1/categories/{id} 相同。",
@@ -188,11 +219,17 @@ func (s *Server) createLocation(ctx context.Context, _ *sdk.CallToolRequest, in 
 	if in.ParentID != nil {
 		parent = catalog.OptionalID{Present: true, Value: *in.ParentID}
 	}
+	custom := catalog.OptionalID{}
+	if in.CustomIconID != nil {
+		custom = catalog.OptionalID{Present: true, Value: *in.CustomIconID}
+	}
 	loc, err := catalog.CreateLocation(ctx, s.db, s.now(), catalog.CreateInput{
 		Name:   catalog.OptionalText{Present: true, Value: in.Name},
 		Type:   catalog.OptionalText{Present: true, Value: in.Type},
 		Code:   optionalText(in.Code),
 		Parent: parent,
+		Icon:   optionalText(in.Icon),
+		Custom: custom,
 	})
 	if err != nil {
 		return writeToolError(err), nil, nil
@@ -204,7 +241,15 @@ func (s *Server) updateLocation(ctx context.Context, _ *sdk.CallToolRequest, in 
 	if res := s.requireScope(ctx, "write"); res != nil {
 		return res, nil, nil
 	}
-	parent, ferr := optionalIDFromRaw(in.ParentID)
+	parent, ferr := optionalIDFromRaw(in.ParentID, "parent_id")
+	if ferr != nil {
+		return ferr, nil, nil
+	}
+	icon, ferr := optionalTextFromRaw(in.Icon, "icon")
+	if ferr != nil {
+		return ferr, nil, nil
+	}
+	custom, ferr := optionalIDFromRaw(in.CustomIconID, "custom_icon_id")
 	if ferr != nil {
 		return ferr, nil, nil
 	}
@@ -212,6 +257,8 @@ func (s *Server) updateLocation(ctx context.Context, _ *sdk.CallToolRequest, in 
 		Name:           optionalText(in.Name),
 		Code:           optionalText(in.Code),
 		Parent:         parent,
+		Icon:           icon,
+		Custom:         custom,
 		VersionPresent: true,
 		Version:        in.Version,
 	})
@@ -225,7 +272,7 @@ func (s *Server) updateCategory(ctx context.Context, _ *sdk.CallToolRequest, in 
 	if res := s.requireScope(ctx, "write"); res != nil {
 		return res, nil, nil
 	}
-	parent, ferr := optionalIDFromRaw(in.ParentID)
+	parent, ferr := optionalIDFromRaw(in.ParentID, "parent_id")
 	if ferr != nil {
 		return ferr, nil, nil
 	}
@@ -308,6 +355,50 @@ func (s *Server) deleteReturnTask(ctx context.Context, _ *sdk.CallToolRequest, i
 	return textResult(map[string]any{})
 }
 
+func (s *Server) createLocationIcon(ctx context.Context, _ *sdk.CallToolRequest, in createLocationIconArgs) (*sdk.CallToolResult, any, error) {
+	if res := s.requireScope(ctx, "write"); res != nil {
+		return res, nil, nil
+	}
+	icon, err := catalog.CreateLocationIcon(ctx, s.db, s.now(), in.Name, in.SVG)
+	if err != nil {
+		return writeToolError(err), nil, nil
+	}
+	return textResult(toLocationIconJSON(icon))
+}
+
+func (s *Server) updateLocationIcon(ctx context.Context, _ *sdk.CallToolRequest, in updateLocationIconArgs) (*sdk.CallToolResult, any, error) {
+	if res := s.requireScope(ctx, "write"); res != nil {
+		return res, nil, nil
+	}
+	icon, err := catalog.UpdateLocationIcon(ctx, s.db, s.now(), in.ID, in.Version, optionalText(in.Name), optionalText(in.SVG))
+	if err != nil {
+		return writeToolError(err), nil, nil
+	}
+	return textResult(toLocationIconJSON(icon))
+}
+
+func (s *Server) deleteLocationIcon(ctx context.Context, _ *sdk.CallToolRequest, in idVersionArgs) (*sdk.CallToolResult, any, error) {
+	if res := s.requireScope(ctx, "write"); res != nil {
+		return res, nil, nil
+	}
+	if err := catalog.DeleteLocationIcon(ctx, s.db, in.ID, in.Version); err != nil {
+		return writeToolError(err), nil, nil
+	}
+	return textResult(map[string]any{})
+}
+
+func locationUpdateInputSchema() *jsonschema.Schema {
+	schema, err := jsonschema.For[updateLocationArgs](&jsonschema.ForOptions{
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+			reflect.TypeFor[json.RawMessage](): {Types: []string{"null", "integer", "string"}},
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return schema
+}
+
 func parentIDInputSchema[T any]() *jsonschema.Schema {
 	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
 		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
@@ -343,7 +434,7 @@ func itemLinksFromArgs(locs *[]itemLocationArg) (bool, []catalog.ItemLinkInput) 
 	return true, links
 }
 
-func optionalIDFromRaw(raw json.RawMessage) (catalog.OptionalID, *sdk.CallToolResult) {
+func optionalIDFromRaw(raw json.RawMessage, field string) (catalog.OptionalID, *sdk.CallToolResult) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return catalog.OptionalID{}, nil
 	}
@@ -352,9 +443,23 @@ func optionalIDFromRaw(raw json.RawMessage) (catalog.OptionalID, *sdk.CallToolRe
 	}
 	var id int64
 	if err := json.Unmarshal(raw, &id); err != nil {
-		return catalog.OptionalID{}, toolFields(map[string]string{"parent_id": "参数不正确"})
+		return catalog.OptionalID{}, toolFields(map[string]string{field: "参数不正确"})
 	}
 	return catalog.OptionalID{Present: true, Value: id}, nil
+}
+
+func optionalTextFromRaw(raw json.RawMessage, field string) (catalog.OptionalText, *sdk.CallToolResult) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return catalog.OptionalText{}, nil
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return catalog.OptionalText{Present: true, Null: true}, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return catalog.OptionalText{}, toolFields(map[string]string{field: "参数不正确"})
+	}
+	return catalog.OptionalText{Present: true, Value: s}, nil
 }
 
 func writeToolError(err error) *sdk.CallToolResult {
@@ -370,6 +475,8 @@ func writeToolError(err error) *sdk.CallToolResult {
 		return toolError("location_cycle", "不能移到自己的下级")
 	case errors.Is(err, catalog.ErrInUse):
 		return toolError("location_in_use", "这个位置下面还有内容")
+	case errors.Is(err, catalog.ErrIconInUse):
+		return toolError("icon_in_use", "有位置正在使用")
 	case errors.Is(err, catalog.ErrCodeTaken):
 		return toolError("code_taken", "编号已被使用")
 	case errors.Is(err, catalog.ErrNotFound):

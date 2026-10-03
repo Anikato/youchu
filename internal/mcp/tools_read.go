@@ -106,6 +106,11 @@ func (s *Server) registerReadTools(mcpServer *sdk.Server) {
 		Description: "读取物品照片 JPEG。variant 为 thumbnail（默认）或 original。回收站中的物品仍可读。",
 		Annotations: readOnly,
 	}, s.getPhoto)
+	sdk.AddTool(mcpServer, &sdk.Tool{
+		Name:        "youchu_list_location_icons",
+		Description: "列出位置自传 SVG 图标。与 GET /api/v1/location-icons 相同。",
+		Annotations: readOnly,
+	}, s.listLocationIcons)
 }
 
 func (s *Server) searchItems(ctx context.Context, _ *sdk.CallToolRequest, in searchItemsArgs) (*sdk.CallToolResult, any, error) {
@@ -281,6 +286,17 @@ func (s *Server) getPhoto(ctx context.Context, _ *sdk.CallToolRequest, in getPho
 		return toolError("internal", "无法读取照片"), nil, nil
 	}
 	return &sdk.CallToolResult{Content: []sdk.Content{&sdk.ImageContent{Data: data, MIMEType: "image/jpeg"}}}, nil, nil
+}
+
+func (s *Server) listLocationIcons(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
+	if res := s.requireScope(ctx, "read"); res != nil {
+		return res, nil, nil
+	}
+	icons, err := catalog.ListLocationIcons(ctx, s.db)
+	if err != nil {
+		return catalogToolError(err), nil, nil
+	}
+	return textResult(toLocationIconPage(icons))
 }
 
 func (s *Server) requireScope(ctx context.Context, scope string) *sdk.CallToolResult {

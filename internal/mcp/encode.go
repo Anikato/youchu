@@ -3,11 +3,12 @@ package mcp
 import "youchu/internal/catalog"
 
 type pathJSON struct {
-	ID   int64   `json:"id"`
-	Name string  `json:"name"`
-	Type string  `json:"type"`
-	Code *string `json:"code"`
-	Icon *string `json:"icon"`
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	Type         string  `json:"type"`
+	Code         *string `json:"code"`
+	Icon         *string `json:"icon"`
+	CustomIconID *int64  `json:"custom_icon_id"`
 }
 
 type locationJSON struct {
@@ -17,11 +18,25 @@ type locationJSON struct {
 	Code            *string    `json:"code"`
 	ParentID        *int64     `json:"parent_id"`
 	Icon            *string    `json:"icon"`
+	CustomIconID    *int64     `json:"custom_icon_id"`
 	Version         int64      `json:"version"`
 	CreatedAt       string     `json:"created_at"`
 	UpdatedAt       string     `json:"updated_at"`
 	Path            []pathJSON `json:"path"`
 	DirectItemCount int        `json:"direct_item_count"`
+}
+
+type locationIconJSON struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	SVG       string `json:"svg"`
+	Version   int64  `json:"version"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type locationIconPageJSON struct {
+	Data []locationIconJSON `json:"data"`
 }
 
 type locationPageJSON struct {
@@ -131,7 +146,10 @@ type returnTaskPageJSON struct {
 func toLocationJSON(loc catalog.Location) locationJSON {
 	path := make([]pathJSON, len(loc.Path))
 	for i, node := range loc.Path {
-		path[i] = pathJSON{ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code, Icon: node.Icon}
+		path[i] = pathJSON{
+			ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code,
+			Icon: node.Icon, CustomIconID: node.CustomIconID,
+		}
 	}
 	return locationJSON{
 		ID:              loc.ID,
@@ -140,12 +158,32 @@ func toLocationJSON(loc catalog.Location) locationJSON {
 		Code:            loc.Code,
 		ParentID:        loc.ParentID,
 		Icon:            loc.Icon,
+		CustomIconID:    loc.CustomIconID,
 		Version:         loc.Version,
 		CreatedAt:       loc.CreatedAt,
 		UpdatedAt:       loc.UpdatedAt,
 		Path:            path,
 		DirectItemCount: loc.DirectItemCount,
 	}
+}
+
+func toLocationIconJSON(icon catalog.LocationIcon) locationIconJSON {
+	return locationIconJSON{
+		ID:        icon.ID,
+		Name:      icon.Name,
+		SVG:       icon.SVG,
+		Version:   icon.Version,
+		CreatedAt: icon.CreatedAt,
+		UpdatedAt: icon.UpdatedAt,
+	}
+}
+
+func toLocationIconPage(icons []catalog.LocationIcon) locationIconPageJSON {
+	data := make([]locationIconJSON, 0, len(icons))
+	for _, icon := range icons {
+		data = append(data, toLocationIconJSON(icon))
+	}
+	return locationIconPageJSON{Data: data}
 }
 
 func toLocationPage(page catalog.ListResult) locationPageJSON {
@@ -186,7 +224,10 @@ func toItemJSON(item catalog.Item) itemJSON {
 	for _, link := range item.Locations {
 		path := make([]pathJSON, 0, len(link.Path))
 		for _, node := range link.Path {
-			path = append(path, pathJSON{ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code, Icon: node.Icon})
+			path = append(path, pathJSON{
+				ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code,
+				Icon: node.Icon, CustomIconID: node.CustomIconID,
+			})
 		}
 		locs = append(locs, itemLocationJSON{LocationID: link.LocationID, Note: link.Note, Path: path})
 	}

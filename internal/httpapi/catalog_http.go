@@ -21,11 +21,12 @@ import (
 var positiveID = regexp.MustCompile(`^[1-9][0-9]*$`)
 
 type pathJSON struct {
-	ID   int64   `json:"id"`
-	Name string  `json:"name"`
-	Type string  `json:"type"`
-	Code *string `json:"code"`
-	Icon *string `json:"icon"`
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	Type         string  `json:"type"`
+	Code         *string `json:"code"`
+	Icon         *string `json:"icon"`
+	CustomIconID *int64  `json:"custom_icon_id"`
 }
 
 type locationJSON struct {
@@ -35,6 +36,7 @@ type locationJSON struct {
 	Code            *string    `json:"code"`
 	ParentID        *int64     `json:"parent_id"`
 	Icon            *string    `json:"icon"`
+	CustomIconID    *int64     `json:"custom_icon_id"`
 	Version         int64      `json:"version"`
 	CreatedAt       string     `json:"created_at"`
 	UpdatedAt       string     `json:"updated_at"`
@@ -94,6 +96,199 @@ func (h *handler) locationByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.notFound(w, r)
 	}
+}
+
+type locationIconJSON struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	SVG       string `json:"svg"`
+	Version   int64  `json:"version"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type locationIconPageJSON struct {
+	Data []locationIconJSON `json:"data"`
+}
+
+func (h *handler) locationIconsCollection(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.listLocationIcons(w, r)
+	case http.MethodPost:
+		h.createLocationIcon(w, r)
+	default:
+		h.notFound(w, r)
+	}
+}
+
+func (h *handler) locationIconByID(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.getLocationIcon(w, r)
+	case http.MethodPatch:
+		h.patchLocationIcon(w, r)
+	case http.MethodDelete:
+		h.deleteLocationIcon(w, r)
+	default:
+		h.notFound(w, r)
+	}
+}
+
+func (h *handler) listLocationIcons(w http.ResponseWriter, r *http.Request) {
+	if !h.currentUser(w, r) {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		writeFields(w, queryRejected(r))
+		return
+	}
+	icons, err := catalog.ListLocationIcons(r.Context(), h.db)
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toIconPageJSON(icons))
+}
+
+func (h *handler) createLocationIcon(w http.ResponseWriter, r *http.Request) {
+	if !h.originOK(w, r) {
+		return
+	}
+	if !h.currentUser(w, r) {
+		return
+	}
+	body, ok := readLimited(w, r, 65536)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		writeFields(w, queryRejected(r))
+		return
+	}
+	in, err := decodeLocationIconWrite(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", "请求格式不正确")
+		return
+	}
+	icon, err := catalog.CreateLocationIcon(r.Context(), h.db, h.now(), iconWriteText(in.Name), iconWriteText(in.SVG))
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toIconJSON(icon))
+}
+
+func (h *handler) getLocationIcon(w http.ResponseWriter, r *http.Request) {
+	if !h.currentUser(w, r) {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		writeFields(w, queryRejected(r))
+		return
+	}
+	id, ok := parseDecimalID(r.PathValue("id"))
+	if !ok {
+		h.notFound(w, r)
+		return
+	}
+	icon, err := catalog.GetLocationIcon(r.Context(), h.db, id)
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toIconJSON(icon))
+}
+
+func (h *handler) patchLocationIcon(w http.ResponseWriter, r *http.Request) {
+	if !h.originOK(w, r) {
+		return
+	}
+	if !h.currentUser(w, r) {
+		return
+	}
+	body, ok := readLimited(w, r, 65536)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		writeFields(w, queryRejected(r))
+		return
+	}
+	in, err := decodeLocationIconWrite(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", "请求格式不正确")
+		return
+	}
+	id, ok := parseDecimalID(r.PathValue("id"))
+	if !ok {
+		h.notFound(w, r)
+		return
+	}
+	version := int64(0)
+	if in.VersionPresent {
+		version = in.Version
+	}
+	icon, err := catalog.UpdateLocationIcon(r.Context(), h.db, h.now(), id, version, iconOptional(in.Name), iconOptional(in.SVG))
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toIconJSON(icon))
+}
+
+func (h *handler) deleteLocationIcon(w http.ResponseWriter, r *http.Request) {
+	if !h.originOK(w, r) {
+		return
+	}
+	if !h.currentUser(w, r) {
+		return
+	}
+	version, fields := deleteVersion(r)
+	if len(fields) > 0 {
+		writeFields(w, fields)
+		return
+	}
+	id, ok := parseDecimalID(r.PathValue("id"))
+	if !ok {
+		h.notFound(w, r)
+		return
+	}
+	if err := catalog.DeleteLocationIcon(r.Context(), h.db, id, version); err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func iconWriteText(v textValue) string {
+	if !v.Present || v.Null {
+		return ""
+	}
+	return v.Value
+}
+
+func iconOptional(v textValue) catalog.OptionalText {
+	return catalog.OptionalText{Present: v.Present, Null: v.Null, Value: v.Value}
+}
+
+func toIconJSON(icon catalog.LocationIcon) locationIconJSON {
+	return locationIconJSON{
+		ID:        icon.ID,
+		Name:      icon.Name,
+		SVG:       icon.SVG,
+		Version:   icon.Version,
+		CreatedAt: icon.CreatedAt,
+		UpdatedAt: icon.UpdatedAt,
+	}
+}
+
+func toIconPageJSON(icons []catalog.LocationIcon) locationIconPageJSON {
+	data := make([]locationIconJSON, 0, len(icons))
+	for _, icon := range icons {
+		data = append(data, toIconJSON(icon))
+	}
+	return locationIconPageJSON{Data: data}
 }
 
 func (h *handler) categoriesCollection(w http.ResponseWriter, r *http.Request) {
@@ -299,6 +494,7 @@ func createInput(in locationWrite) catalog.CreateInput {
 		Code:   catalog.OptionalText{Present: in.Code.Present, Null: in.Code.Null, Value: in.Code.Value},
 		Parent: catalog.OptionalID{Present: in.ParentPresent, Null: in.ParentNull, Value: in.ParentID},
 		Icon:   catalog.OptionalText{Present: in.Icon.Present, Null: in.Icon.Null, Value: in.Icon.Value},
+		Custom: catalog.OptionalID{Present: in.CustomPresent, Null: in.CustomNull, Value: in.CustomID},
 	}
 }
 
@@ -309,6 +505,7 @@ func updateInput(in locationWrite) catalog.UpdateInput {
 		Code:           catalog.OptionalText{Present: in.Code.Present, Null: in.Code.Null, Value: in.Code.Value},
 		Parent:         catalog.OptionalID{Present: in.ParentPresent, Null: in.ParentNull, Value: in.ParentID},
 		Icon:           catalog.OptionalText{Present: in.Icon.Present, Null: in.Icon.Null, Value: in.Icon.Value},
+		Custom:         catalog.OptionalID{Present: in.CustomPresent, Null: in.CustomNull, Value: in.CustomID},
 		VersionPresent: in.VersionPresent,
 		Version:        in.Version,
 	}
@@ -450,7 +647,10 @@ func parseDecimalID(s string) (int64, bool) {
 func toLocationJSON(loc catalog.Location) locationJSON {
 	path := make([]pathJSON, len(loc.Path))
 	for i, node := range loc.Path {
-		path[i] = pathJSON{ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code, Icon: node.Icon}
+		path[i] = pathJSON{
+			ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code,
+			Icon: node.Icon, CustomIconID: node.CustomIconID,
+		}
 	}
 	return locationJSON{
 		ID:              loc.ID,
@@ -459,6 +659,7 @@ func toLocationJSON(loc catalog.Location) locationJSON {
 		Code:            loc.Code,
 		ParentID:        loc.ParentID,
 		Icon:            loc.Icon,
+		CustomIconID:    loc.CustomIconID,
 		Version:         loc.Version,
 		CreatedAt:       loc.CreatedAt,
 		UpdatedAt:       loc.UpdatedAt,
@@ -496,6 +697,8 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "location_cycle", "不能移到自己的下级")
 	case errors.Is(err, catalog.ErrInUse):
 		writeError(w, http.StatusConflict, "location_in_use", "这个位置下面还有内容")
+	case errors.Is(err, catalog.ErrIconInUse):
+		writeError(w, http.StatusConflict, "icon_in_use", "有位置正在使用")
 	case errors.Is(err, catalog.ErrCodeTaken):
 		writeError(w, http.StatusConflict, "code_taken", "编号已被使用")
 	case errors.Is(err, catalog.ErrNotFound):
@@ -1634,7 +1837,10 @@ func toItemJSON(item catalog.Item) itemJSON {
 	for _, link := range item.Locations {
 		path := make([]pathJSON, 0, len(link.Path))
 		for _, node := range link.Path {
-			path = append(path, pathJSON{ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code, Icon: node.Icon})
+			path = append(path, pathJSON{
+				ID: node.ID, Name: node.Name, Type: node.Type, Code: node.Code,
+				Icon: node.Icon, CustomIconID: node.CustomIconID,
+			})
 		}
 		locs = append(locs, itemLocationJSON{LocationID: link.LocationID, Note: link.Note, Path: path})
 	}

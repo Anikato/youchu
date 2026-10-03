@@ -20,6 +20,7 @@ export type PathNode = {
   type: string;
   code: string | null;
   icon: string | null;
+  custom_icon_id: number | null;
 };
 
 export type Location = {
@@ -29,11 +30,21 @@ export type Location = {
   code: string | null;
   parent_id: number | null;
   icon: string | null;
+  custom_icon_id: number | null;
   version: number;
   created_at: string;
   updated_at: string;
   path: PathNode[];
   direct_item_count: number;
+};
+
+export type LocationIconRecord = {
+  id: number;
+  name: string;
+  svg: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ItemLocation = {
@@ -144,6 +155,7 @@ export type LocationCreate = {
   code?: string | null;
   parent_id?: number | null;
   icon?: string | null;
+  custom_icon_id?: number | null;
 };
 
 export type LocationUpdate = {
@@ -152,6 +164,7 @@ export type LocationUpdate = {
   code?: string | null;
   parent_id?: number | null;
   icon?: string | null;
+  custom_icon_id?: number | null;
 };
 
 export type CategoryCreate = {
@@ -191,6 +204,10 @@ export function isNotFound(error: unknown): boolean {
 
 export function isAlreadyCompleted(error: unknown): boolean {
   return error instanceof ApiError && error.code === "already_completed";
+}
+
+export function isIconInUse(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "icon_in_use";
 }
 
 type ErrorBody = {
@@ -251,11 +268,16 @@ function withQuery(path: string, params: URLSearchParams): string {
   return suffix ? `${path}?${suffix}` : path;
 }
 
+function normalizePathNode(node: PathNode): PathNode {
+  return { ...node, icon: node.icon ?? null, custom_icon_id: node.custom_icon_id ?? null };
+}
+
 function normalizeLocation(loc: Location): Location {
   return {
     ...loc,
     icon: loc.icon ?? null,
-    path: Array.isArray(loc.path) ? loc.path.map((node) => ({ ...node, icon: node.icon ?? null })) : [],
+    custom_icon_id: loc.custom_icon_id ?? null,
+    path: Array.isArray(loc.path) ? loc.path.map(normalizePathNode) : [],
     direct_item_count: loc.direct_item_count ?? 0,
   };
 }
@@ -291,7 +313,7 @@ function normalizeItem(item: Item): Item {
     deleted_at: item.deleted_at ?? null,
     locations: links.map((link) => ({
       ...link,
-      path: Array.isArray(link.path) ? link.path.map((node) => ({ ...node, icon: node.icon ?? null })) : [],
+      path: Array.isArray(link.path) ? link.path.map(normalizePathNode) : [],
     })),
     categories: categories.map((link) => ({
       ...link,
@@ -419,6 +441,35 @@ export async function createLocation(body: LocationCreate): Promise<Location> {
 export async function updateLocation(id: string, body: LocationUpdate): Promise<Location> {
   const loc = await sendJSON<Location>(`/api/v1/locations/${encodeURIComponent(id)}`, "PATCH", body, "无法保存位置");
   return normalizeLocation(loc);
+}
+
+export async function listLocationIcons(): Promise<LocationIconRecord[]> {
+  const page = await getJSON<{ data: LocationIconRecord[] }>("/api/v1/location-icons", "无法读取图标");
+  return Array.isArray(page.data) ? page.data : [];
+}
+
+export async function createLocationIcon(name: string, svg: string): Promise<LocationIconRecord> {
+  return sendJSON<LocationIconRecord>("/api/v1/location-icons", "POST", { name, svg }, "无法上传图标");
+}
+
+export async function updateLocationIcon(
+  id: number,
+  body: { version: number; name?: string; svg?: string },
+): Promise<LocationIconRecord> {
+  return sendJSON<LocationIconRecord>(
+    `/api/v1/location-icons/${encodeURIComponent(String(id))}`,
+    "PATCH",
+    body,
+    "无法保存图标",
+  );
+}
+
+export async function deleteLocationIcon(id: number, version: number): Promise<void> {
+  const response = await request(
+    `/api/v1/location-icons/${encodeURIComponent(String(id))}?version=${encodeURIComponent(String(version))}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw await parseError(response, "无法删除图标");
 }
 
 export async function deleteLocation(id: string, version: number): Promise<void> {

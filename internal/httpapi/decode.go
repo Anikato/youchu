@@ -48,6 +48,9 @@ type locationWrite struct {
 	ParentNull     bool
 	ParentID       int64
 	Icon           textValue
+	CustomPresent  bool
+	CustomNull     bool
+	CustomID       int64
 	VersionPresent bool
 	Version        int64
 }
@@ -189,6 +192,41 @@ func decodeItemWrite(body []byte) (itemWrite, error) {
 	return out, nil
 }
 
+type locationIconWrite struct {
+	Name           textValue
+	SVG            textValue
+	VersionPresent bool
+	Version        int64
+}
+
+func decodeLocationIconWrite(body []byte) (locationIconWrite, error) {
+	obj, err := parseObject(body)
+	if err != nil {
+		return locationIconWrite{}, err
+	}
+	var out locationIconWrite
+	if raw, ok := obj["name"]; ok {
+		out.Name, err = decodeNullableString(raw)
+		if err != nil {
+			return locationIconWrite{}, err
+		}
+	}
+	if raw, ok := obj["svg"]; ok {
+		out.SVG, err = decodeNullableString(raw)
+		if err != nil {
+			return locationIconWrite{}, err
+		}
+	}
+	if raw, ok := obj["version"]; ok {
+		out.Version, err = decodeInteger(raw)
+		if err != nil {
+			return locationIconWrite{}, err
+		}
+		out.VersionPresent = true
+	}
+	return out, nil
+}
+
 func decodeLocationWrite(body []byte) (locationWrite, error) {
 	obj, err := parseObject(body)
 	if err != nil {
@@ -227,6 +265,15 @@ func decodeLocationWrite(body []byte) (locationWrite, error) {
 		if err != nil {
 			return locationWrite{}, err
 		}
+	}
+	if raw, ok := obj["custom_icon_id"]; ok {
+		id, isNull, err := decodeOptionalID(raw)
+		if err != nil {
+			return locationWrite{}, err
+		}
+		out.CustomPresent = true
+		out.CustomNull = isNull
+		out.CustomID = id
 	}
 	if raw, ok := obj["version"]; ok {
 		out.Version, err = decodeInteger(raw)

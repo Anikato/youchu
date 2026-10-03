@@ -307,6 +307,155 @@ func TestLocationIcon(t *testing.T) {
 	assertCode(t, rec, http.StatusUnauthorized, "unauthenticated")
 }
 
+func TestMigration008(t *testing.T) {
+	db := migratedDB(t)
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 8`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("version 8 rows = %d", n)
+	}
+	var name string
+	if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'location_icons'`).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	var col string
+	if err := db.QueryRow(`SELECT name FROM pragma_table_info('locations') WHERE name = 'custom_icon_id'`).Scan(&col); err != nil {
+		t.Fatal(err)
+	}
+	if col != "custom_icon_id" {
+		t.Fatalf("custom_icon_id column=%q", col)
+	}
+}
+
+const testSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 8h16v12H4z" fill="#111111"/></svg>`
+
+type iconBody struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	SVG       string `json:"svg"`
+	Version   int64  `json:"version"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func TestLocationIconLibrary(t *testing.T) {
+	_, h, _ := testHandler(t, false)
+	cookie := login(t, h)
+
+	rec := request(h, http.MethodPost, "/api/v1/location-icons", `{"name":"药箱","svg":`+jsonString(testSVG)+`}`, webOrigin, testRemote, cookie)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create icon status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	created := decodeIcon(t, rec)
+	if created.Name != "药箱" || created.ID < 1 || !strings.Contains(created.SVG, "currentColor") || strings.Contains(created.SVG, "#111111") {
+		t.Fatalf("icon=%+v", created)
+	}
+
+	rec = request(h, http.MethodPatch, fmt.Sprintf("/api/v1/location-icons/%d", created.ID), fmt.Sprintf(`{"version":%d,"name":"急救箱"}`, created.Version), webOrigin, testRemote, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	created = decodeIcon(t, rec)
+	if created.Name != "急救箱" {
+		t.Fatalf("renamed=%+v", created)
+	}
+
+	rec = request(h, http.MethodPost, "/api/v1/location-icons", `{"name":"坏","svg":"<svg viewBox=\"0 0 24 24\"><script>x</script></svg>"}`, webOrigin, testRemote, cookie)
+	assertInvalidFields(t, rec, map[string]string{"svg": "图标不正确"})
+
+	rec = request(h, http.MethodPost, "/api/v1/location-icons", `{"name":"空","svg":""}`, webOrigin, testRemote, cookie)
+	assertInvalidFields(t, rec, map[string]string{"svg": "图标不正确"})
+
+	rec = request(h, http.MethodPost, "/api/v1/location-icons", `{"name":"大","svg":`+jsonString(strings.Repeat("x", 16385))+`}`, webOrigin, testRemote, cookie)
+	assertInvalidFields(t, rec, map[string]string{"svg": "图标过大"})
+
+	rec = getLoc(h, cookie, "/api/v1/location-icons")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"data":[`) {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = getLoc(h, cookie, "/api/v1/location-icons?foo=1")
+	assertInvalidFields(t, rec, map[string]string{"foo": "不支持的参数"})
+	rec = getLoc(h, cookie, fmt.Sprintf("/api/v1/location-icons/%d", created.ID))
+	if rec.Code != http.StatusOK || decodeIcon(t, rec).ID != created.ID {
+		t.Fatalf("get icon status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = postLoc(h, cookie, "/api/v1/locations", fmt.Sprintf(`{"name":"药柜","type":"area","custom_icon_id":%d}`, created.ID))
+	loc := assertCreated(t, rec)
+	if loc.Icon != nil || loc.CustomIconID == nil || *loc.CustomIconID != created.ID {
+		t.Fatalf("loc icon=%v custom=%v body=%s", loc.Icon, loc.CustomIconID, rec.Body.String())
+	}
+	if loc.Path[0].CustomIconID == nil || *loc.Path[0].CustomIconID != created.ID {
+		t.Fatalf("path custom=%v", loc.Path[0].CustomIconID)
+	}
+
+	rec = postLoc(h, cookie, "/api/v1/locations", fmt.Sprintf(`{"name":"冲突","type":"area","icon":"kitchen","custom_icon_id":%d}`, created.ID))
+	assertInvalidFields(t, rec, map[string]string{"icon": "不能同时选用内置和自传图标", "custom_icon_id": "不能同时选用内置和自传图标"})
+
+	rec = postLoc(h, cookie, "/api/v1/locations", `{"name":"没有","type":"area","custom_icon_id":999}`)
+	assertInvalidFields(t, rec, map[string]string{"custom_icon_id": "图标不存在"})
+
+	item := mustItem(t, h, cookie, fmt.Sprintf(`{"name":"膏药","locations":[{"location_id":%d}]}`, loc.ID))
+	if len(item.Locations) != 1 || item.Locations[0].Path[0].CustomIconID == nil || *item.Locations[0].Path[0].CustomIconID != created.ID {
+		t.Fatalf("item path=%+v", item.Locations)
+	}
+
+	rec = request(h, http.MethodDelete, fmt.Sprintf("/api/v1/location-icons/%d?version=%d", created.ID, created.Version), "", webOrigin, testRemote, cookie)
+	assertError(t, rec, http.StatusConflict, "icon_in_use", "有位置正在使用")
+
+	rec = patchLoc(h, cookie, locURL(loc.ID), fmt.Sprintf(`{"version":%d,"icon":null}`, loc.Version))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear custom status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	cleared := decodeLoc(t, rec)
+	if cleared.CustomIconID != nil || cleared.Icon != nil {
+		t.Fatalf("cleared=%+v", cleared)
+	}
+
+	rec = request(h, http.MethodDelete, fmt.Sprintf("/api/v1/location-icons/%d?version=%d", created.ID, created.Version), "", webOrigin, testRemote, cookie)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = request(h, http.MethodPost, "/api/v1/location-icons", `{"name":"无会话","svg":`+jsonString(testSVG)+`}`, webOrigin, testRemote, "")
+	assertCode(t, rec, http.StatusUnauthorized, "unauthenticated")
+	rec = request(h, http.MethodPost, "/api/v1/location-icons", `{"name":"坏源","svg":`+jsonString(testSVG)+`}`, "http://evil.example", testRemote, cookie)
+	assertCode(t, rec, http.StatusForbidden, "origin_rejected")
+}
+
+func TestLocationIconLimit(t *testing.T) {
+	_, h, _ := testHandler(t, false)
+	cookie := login(t, h)
+	svg := jsonString(testSVG)
+	for i := 0; i < 40; i++ {
+		rec := request(h, http.MethodPost, "/api/v1/location-icons", fmt.Sprintf(`{"name":"图%02d","svg":%s}`, i+1, svg), webOrigin, testRemote, cookie)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %d status=%d body=%s", i+1, rec.Code, rec.Body.String())
+		}
+	}
+	rec := request(h, http.MethodPost, "/api/v1/location-icons", `{"name":"满","svg":`+svg+`}`, webOrigin, testRemote, cookie)
+	assertInvalidFields(t, rec, map[string]string{"svg": "图标已满"})
+}
+
+func jsonString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func decodeIcon(t *testing.T, rec *httptest.ResponseRecorder) iconBody {
+	t.Helper()
+	var icon iconBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &icon); err != nil {
+		t.Fatalf("body=%s err=%v", rec.Body.String(), err)
+	}
+	return icon
+}
+
 func loadEmbedded() ([]migrate.File, error) {
 	var files []migrate.File
 	err := fs.WalkDir(migrations.FS, ".", func(path string, d fs.DirEntry, err error) error {
@@ -328,21 +477,23 @@ func loadEmbedded() ([]migrate.File, error) {
 }
 
 type locBody struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	Type      string  `json:"type"`
-	Code      *string `json:"code"`
-	ParentID  *int64  `json:"parent_id"`
-	Icon      *string `json:"icon"`
-	Version   int64   `json:"version"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
-	Path      []struct {
-		ID   int64   `json:"id"`
-		Name string  `json:"name"`
-		Type string  `json:"type"`
-		Code *string `json:"code"`
-		Icon *string `json:"icon"`
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	Type         string  `json:"type"`
+	Code         *string `json:"code"`
+	ParentID     *int64  `json:"parent_id"`
+	Icon         *string `json:"icon"`
+	CustomIconID *int64  `json:"custom_icon_id"`
+	Version      int64   `json:"version"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
+	Path         []struct {
+		ID           int64   `json:"id"`
+		Name         string  `json:"name"`
+		Type         string  `json:"type"`
+		Code         *string `json:"code"`
+		Icon         *string `json:"icon"`
+		CustomIconID *int64  `json:"custom_icon_id"`
 	} `json:"path"`
 	DirectItemCount int `json:"direct_item_count"`
 }
@@ -1305,11 +1456,12 @@ func TestLocationVersion(t *testing.T) {
 }
 
 type itemPathNode struct {
-	ID   int64   `json:"id"`
-	Name string  `json:"name"`
-	Type string  `json:"type"`
-	Code *string `json:"code"`
-	Icon *string `json:"icon"`
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	Type         string  `json:"type"`
+	Code         *string `json:"code"`
+	Icon         *string `json:"icon"`
+	CustomIconID *int64  `json:"custom_icon_id"`
 }
 
 type itemLinkBody struct {

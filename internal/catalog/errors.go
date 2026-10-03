@@ -12,6 +12,7 @@ var (
 	ErrNameTaken        = errors.New("name taken")
 	ErrAlreadyCompleted = errors.New("already completed")
 	ErrPhotoLimit       = errors.New("photo limit")
+	ErrIconInUse        = errors.New("icon in use")
 )
 
 type FieldError struct {

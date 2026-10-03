@@ -15,7 +15,7 @@ func TestParentIDInputSchema(t *testing.T) {
 	}
 	for name, schema := range map[string]*jsonschema.Schema{
 		"category": parentIDInputSchema[updateCategoryArgs](),
-		"location": parentIDInputSchema[updateLocationArgs](),
+		"location": locationUpdateInputSchema(),
 	} {
 		resolved, err := schema.Resolve(nil)
 		if err != nil {

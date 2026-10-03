@@ -215,3 +215,23 @@ export function LocationIcon({ name, className }: { name: string; className?: st
     </svg>
   );
 }
+
+export function CustomSVG({ svg, className }: { svg: string; className?: string }) {
+  return <span className={className} aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
+
+export function LocationGlyph({
+  node,
+  library,
+  className,
+}: {
+  node: { icon?: string | null; custom_icon_id?: number | null; type: string };
+  library: { id: number; svg: string }[];
+  className?: string;
+}) {
+  if (node.custom_icon_id != null) {
+    const found = library.find((icon) => icon.id === node.custom_icon_id);
+    if (found) return <CustomSVG svg={found.svg} className={className} />;
+  }
+  return <LocationIcon name={resolvedIcon(node)} className={className} />;
+}

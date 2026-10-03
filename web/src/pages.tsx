@@ -15,6 +15,7 @@ import {
   type ItemUpdate,
   type Location,
   type LocationCreate,
+  type LocationIconRecord,
   type LocationType,
   type LocationUpdate,
   type PathNode,
@@ -26,11 +27,13 @@ import {
   createCategory,
   createItem,
   createLocation,
+  createLocationIcon,
   createReturnTask,
   createToken,
   deleteCategory,
   deleteItem,
   deleteLocation,
+  deleteLocationIcon,
   deletePhoto,
   deleteReturnTask,
   fetchAllCategories,
@@ -41,11 +44,13 @@ import {
   getLocation,
   getTrashItem,
   isAlreadyCompleted,
+  isIconInUse,
   isNotFound,
   isUnauthenticated,
   isVersionConflict,
   listCategories,
   listItems,
+  listLocationIcons,
   listLocations,
   listReturnTasks,
   listTokens,
@@ -58,11 +63,12 @@ import {
   updateCategory,
   updateItem,
   updateLocation,
+  updateLocationIcon,
   updateUsername,
   uploadItemPhoto,
 } from "./api";
 import { clampPageOffset, readItemList, writeItemList, type ItemListState } from "./filters";
-import { ICON_GROUPS, LocationIcon, defaultIconLabel, resolvedIcon } from "./icons";
+import { ICON_GROUPS, CustomSVG, LocationGlyph, defaultIconLabel } from "./icons";
 import styles from "./styles.module.css";
 import { type Accent, type Theme, readAccent, readTheme, setAccent, setTheme } from "./theme";
 
@@ -94,6 +100,8 @@ const inlineFields = new Set([
   "code",
   "parent_id",
   "icon",
+  "custom_icon_id",
+  "svg",
   "locations",
   "categories",
   "type",
@@ -141,11 +149,20 @@ function optionPrefix(pathLength: number): string {
   return "\u3000".repeat(treeDepth(pathLength));
 }
 
+function useIconLibrary() {
+  return useQuery({
+    queryKey: ["location-icons"],
+    queryFn: listLocationIcons,
+    retry: false,
+  });
+}
+
 function LocationPathLine({ path }: { path: PathNode[] }) {
+  const library = useIconLibrary();
   const last = path[path.length - 1];
   return (
     <span className={`${styles.path} ${styles.pathWithIcon}`}>
-      {last ? <LocationIcon name={resolvedIcon(last)} /> : null}
+      {last ? <LocationGlyph node={last} library={library.data ?? []} /> : null}
       <span>{path.length > 0 ? formatPath(path) : ""}</span>
     </span>
   );
@@ -153,22 +170,49 @@ function LocationPathLine({ path }: { path: PathNode[] }) {
 
 function IconPicker({
   value,
+  customIconId,
   type,
   onChange,
   error,
 }: {
   value: string | null;
+  customIconId: number | null;
   type?: LocationType | "";
-  onChange: (value: string | null) => void;
+  onChange: (icon: string | null, customIconId: number | null) => void;
   error?: string;
 }) {
+  const library = useIconLibrary();
+  const queryClient = useQueryClient();
+  const [uploadError, setUploadError] = useState("");
+  const upload = useMutation({
+    mutationFn: (input: { name: string; svg: string }) => createLocationIcon(input.name, input.svg),
+    onSuccess: (created) => {
+      void queryClient.invalidateQueries({ queryKey: ["location-icons"] });
+      onChange(null, created.id);
+      setUploadError("");
+    },
+    onError: (error) => {
+      const api = asApiError(error, "无法上传图标");
+      setUploadError(fieldText(api, "svg") || fieldText(api, "name") || api.message);
+    },
+  });
   const previewType = type && isLocationType(type) ? type : "";
+  const defaultOn = value == null && customIconId == null;
+  const mine = library.data ?? [];
+
+  async function onFile(file: File | undefined) {
+    if (!file) return;
+    const svg = await file.text();
+    const base = file.name.replace(/\.svg$/i, "").trim() || "图标";
+    upload.mutate({ name: base, svg });
+  }
+
   return (
     <fieldset className={styles.iconPicker}>
       <legend>图标</legend>
-      <label className={`${styles.iconChoice} ${value == null ? styles.iconChoiceOn : ""}`}>
-        <input type="radio" name="icon" checked={value == null} onChange={() => onChange(null)} />
-        {previewType ? <LocationIcon name={resolvedIcon({ icon: null, type: previewType })} /> : null}
+      <label className={`${styles.iconChoice} ${defaultOn ? styles.iconChoiceOn : ""}`}>
+        <input type="radio" name="icon" checked={defaultOn} onChange={() => onChange(null, null)} />
+        {previewType ? <LocationGlyph node={{ icon: null, custom_icon_id: null, type: previewType }} library={[]} /> : null}
         <span>默认（{defaultIconLabel(previewType)}）</span>
       </label>
       {ICON_GROUPS.map((group) => (
@@ -178,21 +222,53 @@ function IconPicker({
             {group.icons.map((icon) => (
               <label
                 key={icon.slug}
-                className={`${styles.iconChoice} ${value === icon.slug ? styles.iconChoiceOn : ""}`}
+                className={`${styles.iconChoice} ${value === icon.slug && customIconId == null ? styles.iconChoiceOn : ""}`}
               >
                 <input
                   type="radio"
                   name="icon"
-                  checked={value === icon.slug}
-                  onChange={() => onChange(icon.slug)}
+                  checked={value === icon.slug && customIconId == null}
+                  onChange={() => onChange(icon.slug, null)}
                 />
-                <LocationIcon name={icon.slug} />
+                <LocationGlyph node={{ icon: icon.slug, type: previewType || "area" }} library={[]} />
                 <span>{icon.label}</span>
               </label>
             ))}
           </div>
         </div>
       ))}
+      <p className={styles.iconGroupLabel}>我的</p>
+      <div className={styles.iconGrid}>
+        {mine.map((icon) => (
+          <label
+            key={icon.id}
+            className={`${styles.iconChoice} ${customIconId === icon.id ? styles.iconChoiceOn : ""}`}
+          >
+            <input
+              type="radio"
+              name="icon"
+              checked={customIconId === icon.id}
+              onChange={() => onChange(null, icon.id)}
+            />
+            <CustomSVG svg={icon.svg} />
+            <span>{icon.name}</span>
+          </label>
+        ))}
+      </div>
+      <label className={styles.iconUpload}>
+        上传 SVG
+        <input
+          type="file"
+          accept="image/svg+xml,.svg"
+          disabled={upload.isPending}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            void onFile(file);
+          }}
+        />
+      </label>
+      {uploadError ? <span className={styles.error}>{uploadError}</span> : null}
       {error ? <span className={styles.error}>{error}</span> : null}
     </fieldset>
   );
@@ -302,10 +378,13 @@ function locationCreateBody(
   code: string,
   parentId: number | null,
   icon: string | null,
+  customIconId: number | null,
 ): LocationCreate {
-  const body: LocationCreate = { name, type, icon };
+  const body: LocationCreate = { name, type };
   if (type !== "area") body.code = code;
   if (parentId != null) body.parent_id = parentId;
+  if (customIconId != null) body.custom_icon_id = customIconId;
+  else body.icon = icon;
   return body;
 }
 
@@ -316,9 +395,12 @@ function locationUpdateBody(
   code: string,
   parentId: number | null,
   icon: string | null,
+  customIconId: number | null,
 ): LocationUpdate {
-  const body: LocationUpdate = { version, name, parent_id: parentId, icon };
+  const body: LocationUpdate = { version, name, parent_id: parentId };
   if (type !== "area") body.code = code;
+  if (customIconId != null) body.custom_icon_id = customIconId;
+  else body.icon = icon;
   return body;
 }
 
@@ -2241,6 +2323,7 @@ export function ReturnListPage() {
 }
 
 function LocationLinks({ rows }: { rows: Location[] }) {
+  const library = useIconLibrary();
   return (
     <ul className={`${styles.list} ${styles.treeList}`}>
       {rows.map((row) => (
@@ -2250,7 +2333,7 @@ function LocationLinks({ rows }: { rows: Location[] }) {
           style={treeStyle(row.path.length)}
         >
           <Link className={styles.itemLink} to={`/locations/${row.id}`}>
-            <LocationIcon name={resolvedIcon(row)} className={styles.rowIcon} />
+            <LocationGlyph node={row} library={library.data ?? []} className={styles.rowIcon} />
             <span className={styles.itemLinkBody}>
               <span>{row.name}</span>
               {row.code ? <span className={styles.codeBadge}>{row.code}</span> : null}
@@ -2348,6 +2431,7 @@ function LocationCreateForm({ parentParam }: { parentParam: string }) {
   const [type, setType] = useState<LocationType | "">("");
   const [parentId, setParentId] = useState<number | null>(null);
   const [icon, setIcon] = useState<string | null>(null);
+  const [customIconId, setCustomIconId] = useState<number | null>(null);
   const [formError, setFormError] = useState<ApiError | null>(null);
 
   useEffect(() => {
@@ -2390,7 +2474,7 @@ function LocationCreateForm({ parentParam }: { parentParam: string }) {
     }
     setFormError(null);
     const chosenParent = hasParent ? (parentQuery.data?.id ?? null) : parentId;
-    create.mutate(locationCreateBody(type, name, code, chosenParent, icon));
+    create.mutate(locationCreateBody(type, name, code, chosenParent, icon, customIconId));
   }
 
   if (hasParent && parentQuery.isError) {
@@ -2458,7 +2542,16 @@ function LocationCreateForm({ parentParam }: { parentParam: string }) {
             error={fieldText(formError, "parent_id")}
           />
         ) : null}
-        <IconPicker value={icon} type={type} onChange={setIcon} error={fieldText(formError, "icon")} />
+        <IconPicker
+          value={icon}
+          customIconId={customIconId}
+          type={type}
+          onChange={(nextIcon, nextCustom) => {
+            setIcon(nextIcon);
+            setCustomIconId(nextCustom);
+          }}
+          error={fieldText(formError, "icon") || fieldText(formError, "custom_icon_id")}
+        />
         <FormIssues error={formError} />
         <button className={styles.button} type="submit" disabled={create.isPending}>
           保存
@@ -2513,6 +2606,7 @@ function LocationScreen({ id }: { id: string }) {
   const [code, setCode] = useState("");
   const [parentId, setParentId] = useState<number | null>(null);
   const [icon, setIcon] = useState<string | null>(null);
+  const [customIconId, setCustomIconId] = useState<number | null>(null);
   const [version, setVersion] = useState(0);
   const [conflict, setConflict] = useState(false);
   const [conflictMessage, setConflictMessage] = useState("");
@@ -2530,6 +2624,7 @@ function LocationScreen({ id }: { id: string }) {
     setCode(loc.data.code ?? "");
     setParentId(loc.data.parent_id);
     setIcon(loc.data.icon);
+    setCustomIconId(loc.data.custom_icon_id);
     setVersion(loc.data.version);
     setFormReady(true);
   }, [formReady, recordReady, loc.data]);
@@ -2539,6 +2634,7 @@ function LocationScreen({ id }: { id: string }) {
     setCode(next.code ?? "");
     setParentId(next.parent_id);
     setIcon(next.icon);
+    setCustomIconId(next.custom_icon_id);
     setVersion(next.version);
     setConflict(false);
   }
@@ -2639,7 +2735,7 @@ function LocationScreen({ id }: { id: string }) {
   function onSave(event: FormEvent) {
     event.preventDefault();
     setFormError(null);
-    save.mutate(locationUpdateBody(record.type, version, name, code, parentId, icon));
+    save.mutate(locationUpdateBody(record.type, version, name, code, parentId, icon, customIconId));
   }
 
   function onQuick(event: FormEvent) {
@@ -2742,7 +2838,16 @@ function LocationScreen({ id }: { id: string }) {
           error={fieldText(formError, "parent_id")}
           fallbackLabel={fallbackLabel}
         />
-        <IconPicker value={icon} type={record.type} onChange={setIcon} error={fieldText(formError, "icon")} />
+        <IconPicker
+          value={icon}
+          customIconId={customIconId}
+          type={record.type}
+          onChange={(nextIcon, nextCustom) => {
+            setIcon(nextIcon);
+            setCustomIconId(nextCustom);
+          }}
+          error={fieldText(formError, "icon") || fieldText(formError, "custom_icon_id")}
+        />
         <FormIssues error={formError} />
         {conflict ? (
           <ConflictNotice message={conflictMessage} pending={loadingLatest} onLoad={() => void loadLatest()} error={latestError} />
@@ -3573,6 +3678,142 @@ function AppearanceFields() {
   );
 }
 
+function IconLibrarySection() {
+  const query = useIconLibrary();
+  const queryClient = useQueryClient();
+  const [names, setNames] = useState<Record<number, string>>({});
+  const [formError, setFormError] = useState<ApiError | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const [deleting, setDeleting] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!query.data) return;
+    setNames((current) => {
+      const next = { ...current };
+      for (const icon of query.data) {
+        if (next[icon.id] === undefined) next[icon.id] = icon.name;
+      }
+      return next;
+    });
+  }, [query.data]);
+
+  const upload = useMutation({
+    mutationFn: (input: { name: string; svg: string }) => createLocationIcon(input.name, input.svg),
+    onSuccess: () => {
+      setUploadError("");
+      setFormError(null);
+      void queryClient.invalidateQueries({ queryKey: ["location-icons"] });
+    },
+    onError: (error) => {
+      const api = asApiError(error, "无法上传图标");
+      setUploadError(fieldText(api, "svg") || fieldText(api, "name") || api.message);
+    },
+  });
+  const saveName = useMutation({
+    mutationFn: (icon: LocationIconRecord) =>
+      updateLocationIcon(icon.id, { version: icon.version, name: names[icon.id] ?? icon.name }),
+    onSuccess: (updated) => {
+      setFormError(null);
+      setNames((current) => ({ ...current, [updated.id]: updated.name }));
+      void queryClient.invalidateQueries({ queryKey: ["location-icons"] });
+    },
+    onError: (error) => setFormError(asApiError(error, "无法保存图标")),
+  });
+  const remove = useMutation({
+    mutationFn: (icon: LocationIconRecord) => deleteLocationIcon(icon.id, icon.version),
+    onSuccess: () => {
+      setFormError(null);
+      setDeleting(null);
+      void queryClient.invalidateQueries({ queryKey: ["location-icons"] });
+    },
+    onError: (error) => {
+      if (isIconInUse(error)) {
+        setFormError(asApiError(error, "有位置正在使用"));
+        setDeleting(null);
+        return;
+      }
+      setFormError(asApiError(error, "无法删除图标"));
+    },
+  });
+  useOnUnauth(query.error);
+  useOnUnauth(upload.error);
+  useOnUnauth(saveName.error);
+  useOnUnauth(remove.error);
+
+  async function onFile(file: File | undefined) {
+    if (!file) return;
+    const svg = await file.text();
+    const base = file.name.replace(/\.svg$/i, "").trim() || "图标";
+    upload.mutate({ name: base, svg });
+  }
+
+  const icons = query.data ?? [];
+
+  return (
+    <section>
+      <h2 className={styles.sectionTitle}>图标</h2>
+      {query.isLoading ? <Loading /> : null}
+      {query.isError ? (
+        <LoadError error={query.error} onRetry={() => void query.refetch()} pending={query.isFetching} />
+      ) : null}
+      {query.isSuccess && icons.length === 0 ? <p>还没有自己的图标</p> : null}
+      {icons.length > 0 ? (
+        <ul className={styles.iconLibraryList}>
+          {icons.map((icon) => (
+            <li key={icon.id} className={styles.iconLibraryRow}>
+              <CustomSVG svg={icon.svg} className={styles.rowIcon} />
+              <input
+                name={`icon-name-${icon.id}`}
+                value={names[icon.id] ?? icon.name}
+                onChange={(event) => setNames((current) => ({ ...current, [icon.id]: event.target.value }))}
+              />
+              <div className={styles.iconLibraryActions}>
+                <button
+                  className={styles.button}
+                  type="button"
+                  disabled={saveName.isPending}
+                  onClick={() => saveName.mutate(icon)}
+                >
+                  保存
+                </button>
+                <DeleteConfirm
+                  confirming={deleting === icon.id}
+                  pending={remove.isPending}
+                  error={deleting === icon.id ? formError : null}
+                  onAsk={() => {
+                    setDeleting(icon.id);
+                    setFormError(null);
+                  }}
+                  onCancel={() => {
+                    setDeleting(null);
+                    setFormError(null);
+                  }}
+                  onConfirm={() => remove.mutate(icon)}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <label className={styles.iconUpload}>
+        上传 SVG
+        <input
+          type="file"
+          accept="image/svg+xml,.svg"
+          disabled={upload.isPending}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            void onFile(file);
+          }}
+        />
+      </label>
+      {uploadError ? <p className={styles.error}>{uploadError}</p> : null}
+      {deleting == null && formError ? <FormIssues error={formError} /> : null}
+    </section>
+  );
+}
+
 export function AccountPage() {
   const me = useQuery({ queryKey: ["me"], queryFn: fetchMe, retry: false });
   const tokens = useQuery({ queryKey: ["tokens"], queryFn: listTokens, retry: false });
@@ -3688,6 +3929,7 @@ export function AccountPage() {
     <>
       <h1 className={styles.title}>账号</h1>
       <AppearanceFields />
+      <IconLibrarySection />
       <h2 className={styles.sectionTitle}>用户名</h2>
       <form onSubmit={onUsernameSubmit}>
         <label className={styles.field}>

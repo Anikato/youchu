@@ -75,6 +75,7 @@ import { PageEnter, StaggerList } from "./motion";
 import { PendingPhotos } from "./pendingPhotos";
 import { PhotoAddButtons } from "./photos";
 import { readLastCategoryIds, readLastLocationId, rememberItemPlacement } from "./prefs";
+import { filterLocations } from "./locationSearch";
 import { formatAddedAt } from "./relativeTime";
 import { StickySave, saveButtonLabel } from "./stickySave";
 import styles from "./styles.module.css";
@@ -965,12 +966,38 @@ function ItemLocationsField({
     retry: false,
   });
   useOnUnauth(options.error);
-  const [picked, setPicked] = useState("");
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const chosen = new Set(links.map((link) => link.location_id));
   const available = (options.data ?? []).filter((loc) => !chosen.has(loc.id));
+  const matches = filterLocations(query, available);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: PointerEvent) {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
+  }, [open]);
+
+  function add(loc: Location) {
+    if (chosen.has(loc.id)) return;
+    onChange([
+      ...links,
+      {
+        location_id: loc.id,
+        note: null,
+        path: loc.path.map((node) => ({ ...node })),
+      },
+    ]);
+    setQuery("");
+  }
 
   return (
-    <div className={styles.field}>
+    <div className={styles.field} ref={rootRef}>
       <span>存放位置</span>
       {links.map((link) => (
         <div key={link.location_id}>
@@ -1001,37 +1028,54 @@ function ItemLocationsField({
         <LoadError error={options.error} onRetry={() => void options.refetch()} pending={options.isFetching} />
       ) : null}
       {options.data ? (
-        <div className={styles.stack}>
-          <select name="location_id" value={picked} onChange={(event) => setPicked(event.target.value)}>
-            <option value="">选择存放位置</option>
-            {available.map((loc) => (
-              <option key={loc.id} value={loc.id}>
-                {optionPrefix(loc.path.length)}
-                {formatPath(loc.path)}
-              </option>
-            ))}
-          </select>
-          <button
-            className={styles.button}
-            type="button"
-            disabled={picked === ""}
-            onClick={() => {
-              const loc = options.data?.find((item) => String(item.id) === picked);
-              if (!loc || chosen.has(loc.id)) return;
-              onChange([
-                ...links,
-                {
-                  location_id: loc.id,
-                  note: null,
-                  path: loc.path.map((node) => ({ ...node })),
-                },
-              ]);
-              setPicked("");
+        <>
+          <input
+            type="search"
+            name="location_q"
+            value={query}
+            placeholder="找位置"
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-expanded={open}
+            aria-controls="location-choices"
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
             }}
-          >
-            添加
-          </button>
-        </div>
+            onFocus={() => setOpen(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setOpen(false);
+                return;
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                if (matches[0]) add(matches[0]);
+              }
+            }}
+          />
+          {open ? (
+            <ul id="location-choices" className={styles.locationChoices} role="listbox">
+              {matches.length === 0 ? (
+                <li className={styles.locationChoicesEmpty}>没有符合的位置</li>
+              ) : (
+                matches.map((loc) => (
+                  <li key={loc.id} role="option">
+                    <button
+                      className={styles.button}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => add(loc)}
+                    >
+                      {formatPath(loc.path)}
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          ) : null}
+        </>
       ) : null}
       {error ? <span className={styles.error}>{error}</span> : null}
     </div>

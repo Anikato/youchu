@@ -1023,6 +1023,7 @@ function ItemCategoriesField({
   onChange: (links: ItemCategory[]) => void;
   error?: string;
 }) {
+  const queryClient = useQueryClient();
   const options = useQuery({
     queryKey: ["categories", "flat"],
     queryFn: () => fetchAllCategories(new URLSearchParams({ flat: "1" })),
@@ -1030,8 +1031,36 @@ function ItemCategoriesField({
   });
   useOnUnauth(options.error);
   const [picked, setPicked] = useState("");
+  const [newName, setNewName] = useState("");
+  const [createError, setCreateError] = useState<ApiError | null>(null);
   const chosen = new Set(links.map((link) => link.category_id));
   const available = (options.data ?? []).filter((cat) => !chosen.has(cat.id));
+  const create = useMutation({
+    mutationFn: (name: string) => createCategory({ name }),
+    onSuccess: (cat) => {
+      void queryClient.invalidateQueries({ queryKey: ["categories"] });
+      setNewName("");
+      setCreateError(null);
+      if (chosen.has(cat.id)) return;
+      onChange([
+        ...links,
+        {
+          category_id: cat.id,
+          source: "human",
+          path: cat.path.map((node) => ({ ...node })),
+        },
+      ]);
+    },
+    onError: (err) => setCreateError(asApiError(err, "无法新增分类")),
+  });
+  useOnUnauth(create.error);
+
+  function submitNew() {
+    const name = newName.trim();
+    if (name === "" || create.isPending) return;
+    setCreateError(null);
+    create.mutate(name);
+  }
 
   return (
     <div className={styles.field}>
@@ -1087,6 +1116,25 @@ function ItemCategoriesField({
           </button>
         </div>
       ) : null}
+      <span>新建分类</span>
+      <div className={styles.stack}>
+        <input
+          name="new_category"
+          value={newName}
+          autoComplete="off"
+          onChange={(event) => setNewName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            submitNew();
+          }}
+        />
+        <button className={styles.button} type="button" disabled={newName.trim() === "" || create.isPending} onClick={submitNew}>
+          新建
+        </button>
+      </div>
+      {fieldText(createError, "name") ? <span className={styles.error}>{fieldText(createError, "name")}</span> : null}
+      {createError && !fieldText(createError, "name") ? <span className={styles.error}>{createError.message}</span> : null}
       {error ? <span className={styles.error}>{error}</span> : null}
     </div>
   );

@@ -3662,6 +3662,58 @@ func TestCategoryCycle(t *testing.T) {
 	}
 }
 
+func TestCategoryReparentKeepsItemLinks(t *testing.T) {
+	db, h, _ := testHandler(t, false)
+	cookie := login(t, h)
+	kitchen := mustCreateCat(t, h, cookie, `{"name":"厨房"}`)
+	tools := mustCreateCat(t, h, cookie, `{"name":"刀具"}`)
+	item := mustItem(t, h, cookie, fmt.Sprintf(`{"name":"菜刀","categories":[{"category_id":%d}]}`, tools.ID))
+	if len(item.Categories) != 1 || item.Categories[0].CategoryID != tools.ID {
+		t.Fatalf("categories=%+v", item.Categories)
+	}
+	if len(item.Categories[0].Path) != 1 || item.Categories[0].Path[0].Name != "刀具" {
+		t.Fatalf("path=%+v", item.Categories[0].Path)
+	}
+	if countQuery(t, db, `SELECT COUNT(*) FROM item_categories WHERE item_id = ? AND category_id = ?`, item.ID, tools.ID) != 1 {
+		t.Fatal("missing item_categories row")
+	}
+
+	rec := patchCat(h, cookie, catURL(tools.ID), fmt.Sprintf(`{"version":1,"parent_id":%d}`, kitchen.ID))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	moved := decodeCat(t, rec)
+	if moved.ParentID == nil || *moved.ParentID != kitchen.ID || moved.Version != 2 {
+		t.Fatalf("moved=%+v", moved)
+	}
+	if len(moved.Path) != 2 || moved.Path[0].ID != kitchen.ID || moved.Path[1].ID != tools.ID {
+		t.Fatalf("moved path=%+v", moved.Path)
+	}
+
+	got := requireItem(t, h, cookie, item.ID)
+	if got.Version != item.Version {
+		t.Fatalf("item version changed %d -> %d", item.Version, got.Version)
+	}
+	if len(got.Categories) != 1 || got.Categories[0].CategoryID != tools.ID {
+		t.Fatalf("after categories=%+v", got.Categories)
+	}
+	if len(got.Categories[0].Path) != 2 || got.Categories[0].Path[0].Name != "厨房" || got.Categories[0].Path[1].Name != "刀具" {
+		t.Fatalf("after path=%+v", got.Categories[0].Path)
+	}
+	if countQuery(t, db, `SELECT COUNT(*) FROM item_categories WHERE item_id = ? AND category_id = ?`, item.ID, tools.ID) != 1 {
+		t.Fatal("item_categories row changed")
+	}
+
+	branch := mustItemPage(t, getItem(h, cookie, fmt.Sprintf("/api/v1/items?category=%d", kitchen.ID)))
+	if branch.Total != 1 || len(branch.Data) != 1 || branch.Data[0].ID != item.ID {
+		t.Fatalf("kitchen branch=%+v", branch)
+	}
+	direct := mustItemPage(t, getItem(h, cookie, fmt.Sprintf("/api/v1/items?category=%d&category_descendants=0", kitchen.ID)))
+	if direct.Total != 0 {
+		t.Fatalf("kitchen direct=%+v", direct)
+	}
+}
+
 func TestCategoryDelete(t *testing.T) {
 	_, h, _ := testHandler(t, false)
 	cookie := login(t, h)

@@ -1729,6 +1729,7 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
     setFormError(null);
     let item: Item;
     try {

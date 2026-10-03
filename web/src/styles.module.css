@@ -497,7 +497,7 @@ a.buttonPrimary {
 .pageEnter { min-width: 0; }
 .appPage > form:not(.searchRow),
 .appPage > section,
-.appPage > div > form,
+.appPage > div > form:not(.searchRow),
 .appPage > .pageEnter > form:not(.searchRow),
 .appPage > .pageEnter > section { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 16px; padding: 1.5rem; margin: 1rem 0; }
 .field { gap: .5rem; margin-bottom: 1.2rem; font-size: .95rem; font-weight: 500; }
@@ -550,7 +550,7 @@ a.buttonPrimary {
   .searchRow > a { width: 100%; }
   .appPage > form:not(.searchRow),
   .appPage > section,
-  .appPage > div > form,
+  .appPage > div > form:not(.searchRow),
   .appPage > .pageEnter > form:not(.searchRow),
   .appPage > .pageEnter > section { padding: 1rem; }
   .itemThumb, .itemPlaceholder { --thumb: 3.5rem; }

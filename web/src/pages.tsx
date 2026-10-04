@@ -68,7 +68,20 @@ import {
   updateUsername,
   uploadItemPhoto,
 } from "./api";
-import { clampPageOffset, readItemList, writeItemList, type ItemListState } from "./filters";
+import { clampPageOffset, ITEM_PAGE_SIZES, readItemList, writeItemList, type ItemListState, type ItemPageSize } from "./filters";
+import { Pager } from "./pager";
+import { locationDeletable } from "./select";
+import {
+  BatchBar,
+  LocationPickPanel,
+  RowCheck,
+  SelectToggle,
+  UndoBanner,
+  useItemListBatch,
+  useLocationListBatch,
+  useReturnListBatch,
+  useTrashListBatch,
+} from "./selectUi";
 import { ICON_GROUPS, CustomSVG, LocationGlyph, defaultIconLabel } from "./icons";
 import { LeaveGuard } from "./leaveGuard";
 import { PageEnter, StaggerList } from "./motion";
@@ -564,39 +577,6 @@ function scrollToFormError() {
   requestAnimationFrame(() => {
     document.querySelector(`.${styles.error}`)?.scrollIntoView({ block: "center" });
   });
-}
-
-function Pager({
-  offset,
-  limit,
-  total,
-  count,
-  onPage,
-}: {
-  offset: number;
-  limit: number;
-  total: number;
-  count: number;
-  onPage: (offset: number) => void;
-}) {
-  const step = limit > 0 ? limit : Math.max(count, 1);
-  const hasPrev = offset > 0;
-  const hasNext = total > offset + count;
-  if (!hasPrev && !hasNext) return null;
-  return (
-    <div className={styles.actions}>
-      {hasPrev ? (
-        <button className={styles.button} type="button" onClick={() => onPage(Math.max(0, offset - step))}>
-          上一页
-        </button>
-      ) : null}
-      {hasNext ? (
-        <button className={styles.button} type="button" onClick={() => onPage(offset + step)}>
-          下一页
-        </button>
-      ) : null}
-    </div>
-  );
 }
 
 function Breadcrumb({ path }: { path: PathNode[] }) {
@@ -1366,6 +1346,7 @@ const emptyItemList: ItemListState = {
   uncategorized: false,
   sort: "created_at",
   offset: "",
+  limit: 30,
 };
 
 function emptyCopy(state: ItemListState): string {
@@ -1430,6 +1411,18 @@ export function ItemListPage() {
     view.categoryIds.length > 0 ||
     view.uncategorized;
 
+  const batch = useItemListBatch(listQuery);
+  const selectedItems = (page?.data ?? []).filter((item) => batch.selection.selected.has(item.id));
+
+  useEffect(() => {
+    if (!page) return;
+    const currentOffset = Number(view.offset || "0");
+    const clamped = clampPageOffset(page.total, currentOffset, page.limit > 0 ? page.limit : view.limit);
+    if (clamped !== currentOffset) {
+      setParams((current) => writeItemList({ ...readItemList(current), offset: clamped > 0 ? String(clamped) : "" }));
+    }
+  }, [page, view.offset, view.limit, setParams]);
+
   function applyFilters(patch: Partial<ItemListState>) {
     setParams((current) => writeItemList({ ...readItemList(current), ...patch, offset: "" }));
   }
@@ -1450,6 +1443,16 @@ export function ItemListPage() {
     <>
       <h1 className={styles.title}>家里的物品</h1>
       <p className={styles.intro}>记下拥有的东西，找到它们的去处。</p>
+      {batch.undo.message ? (
+        <UndoBanner message={batch.undo.message} onUndo={() => void batch.undoTrash()} onDismiss={() => batch.undo.clear()} />
+      ) : null}
+      <SelectToggle
+        selecting={batch.selection.selecting}
+        onToggle={() => batch.selection.toggleMode()}
+        allSelected={batch.selection.pageAllSelected((page?.data ?? []).map((item) => item.id))}
+        onSelectAll={() => batch.selection.selectAll((page?.data ?? []).map((item) => item.id))}
+        selectAllDisabled={!page || page.data.length === 0}
+      />
       <form
         className={styles.searchRow}
         onSubmit={(event: FormEvent) => {
@@ -1491,6 +1494,20 @@ export function ItemListPage() {
         >
           <option value="created_at">最新在前</option>
           <option value="name">按名称</option>
+        </select>
+      </label>
+      <label className={styles.field}>
+        每页
+        <select
+          name="limit"
+          value={String(view.limit)}
+          onChange={(event) => applyFilters({ limit: Number(event.target.value) as ItemPageSize })}
+        >
+          {ITEM_PAGE_SIZES.map((size) => (
+            <option key={size} value={size}>
+              {size} 条
+            </option>
+          ))}
         </select>
       </label>
       <details className={styles.filters}>
@@ -1678,7 +1695,7 @@ export function ItemListPage() {
             onClick={() => {
               setQInput("");
               setPickedCategory("");
-              setParams(writeItemList(emptyItemList));
+              setParams(writeItemList({ ...emptyItemList, limit: view.limit }));
             }}
           >
             清空筛选
@@ -1692,21 +1709,39 @@ export function ItemListPage() {
       {page && page.data.length > 0 ? (
         <StaggerList className={styles.list}>
           {page.data.map((item) => (
-            <li key={item.id}>
-              <Link className={styles.itemLink} to={`/items/${item.id}`}>
-                <ItemThumb photoId={item.photos[0]?.id} />
-                <span className={styles.itemLinkBody}>
-                  <span>{item.name}</span>
-                  {item.locations.length === 0 ? (
-                    <span className={styles.meta}>待定位</span>
-                  ) : (
-                    item.locations.map((link) => (
-                      <LocationPathLine key={link.location_id} path={link.path} />
-                    ))
-                  )}
-                  <span className={styles.meta}>{formatAddedAt(item.created_at)}</span>
-                </span>
-              </Link>
+            <li key={item.id} className={styles.selectRow}>
+              <RowCheck
+                selecting={batch.selection.selecting}
+                checked={batch.selection.selected.has(item.id)}
+                onToggle={() => batch.selection.toggle(item.id)}
+              />
+              {batch.selection.selecting ? (
+                <button className={styles.itemLink} type="button" onClick={() => batch.selection.toggle(item.id)}>
+                  <ItemThumb photoId={item.photos[0]?.id} />
+                  <span className={styles.itemLinkBody}>
+                    <span>{item.name}</span>
+                    {item.locations.length === 0 ? (
+                      <span className={styles.meta}>待定位</span>
+                    ) : (
+                      item.locations.map((link) => <LocationPathLine key={link.location_id} path={link.path} />)
+                    )}
+                    <span className={styles.meta}>{formatAddedAt(item.created_at)}</span>
+                  </span>
+                </button>
+              ) : (
+                <Link className={styles.itemLink} to={`/items/${item.id}`}>
+                  <ItemThumb photoId={item.photos[0]?.id} />
+                  <span className={styles.itemLinkBody}>
+                    <span>{item.name}</span>
+                    {item.locations.length === 0 ? (
+                      <span className={styles.meta}>待定位</span>
+                    ) : (
+                      item.locations.map((link) => <LocationPathLine key={link.location_id} path={link.path} />)
+                    )}
+                    <span className={styles.meta}>{formatAddedAt(item.created_at)}</span>
+                  </span>
+                </Link>
+              )}
             </li>
           ))}
         </StaggerList>
@@ -1723,6 +1758,65 @@ export function ItemListPage() {
             )
           }
         />
+      ) : null}
+      {batch.selection.selecting && batch.picking ? (
+        <LocationPickPanel
+          onPick={(loc) => {
+            batch.setDest(loc);
+            batch.setPicking(false);
+            batch.setConfirm("move");
+          }}
+          onCancel={() => {
+            batch.setPicking(false);
+            batch.setDest(null);
+          }}
+        />
+      ) : null}
+      {batch.selection.selecting && !batch.picking ? (
+        <BatchBar
+          count={selectedItems.length}
+          pending={batch.pending}
+          error={batch.error}
+          confirming={batch.confirm === "trash" ? "trash" : batch.confirm === "move" ? "move" : null}
+          confirmText={
+            batch.confirm === "trash"
+              ? `将 ${selectedItems.length} 件物品移到回收站`
+              : batch.confirm === "move" && batch.dest
+                ? `将 ${selectedItems.length} 件搬到 ${batch.dest.name}${batch.dest.code ? ` ${batch.dest.code}` : ""}，原来的位置清掉`
+                : undefined
+          }
+          onConfirm={() => {
+            if (batch.confirm === "trash") void batch.trash(selectedItems);
+            if (batch.confirm === "move" && batch.dest) void batch.move(selectedItems, batch.dest);
+          }}
+          onCancel={() => {
+            batch.setConfirm(null);
+            batch.setDest(null);
+          }}
+        >
+          <button
+            className={styles.buttonDanger}
+            type="button"
+            disabled={selectedItems.length === 0 || batch.pending}
+            onClick={() => {
+              batch.setError("");
+              batch.setConfirm("trash");
+            }}
+          >
+            移到回收站
+          </button>
+          <button
+            className={styles.button}
+            type="button"
+            disabled={selectedItems.length === 0 || batch.pending}
+            onClick={() => {
+              batch.setError("");
+              batch.setPicking(true);
+            }}
+          >
+            放入位置
+          </button>
+        </BatchBar>
       ) : null}
     </>
   );
@@ -2563,38 +2657,64 @@ export function ReturnListPage() {
     }
   }
 
+  const batch = useReturnListBatch(offsetRaw ?? "");
+  const selectedTasks = (page?.data ?? []).filter((task) => batch.selection.selected.has(task.id));
+
   return (
     <>
       <h1 className={styles.title}>待归位</h1>
       {notice ? <p>{notice}</p> : null}
       {verifyError ? <p className={styles.error}>{verifyError}</p> : null}
+      <SelectToggle
+        selecting={batch.selection.selecting}
+        onToggle={() => batch.selection.toggleMode()}
+        allSelected={batch.selection.pageAllSelected((page?.data ?? []).map((task) => task.id))}
+        onSelectAll={() => batch.selection.selectAll((page?.data ?? []).map((task) => task.id))}
+        selectAllDisabled={!page || page.data.length === 0}
+      />
       {query.isLoading ? <Loading /> : null}
       {query.isError ? <LoadError error={query.error} onRetry={() => void query.refetch()} pending={query.isFetching} /> : null}
       {page && page.total === 0 ? <p>没有待归位事项</p> : null}
       {page && page.data.length > 0 ? (
         <ul className={styles.list}>
-          {page.data.map((task) => (
-            <OpenReturnTaskRow
-              key={task.id}
-              task={task}
-              showItemName
-              onCompleteSuccess={() => {
-                setNotice("");
-                setVerifyError("");
-                void reloadReturnList();
-              }}
-              onRemoveSuccess={() => {
-                setNotice("");
-                setVerifyError("");
-                void reloadReturnList();
-              }}
-              onNotFound={() => handleListTaskNotFound(task.item_id)}
-              onStale={(message) => {
-                setNotice(message);
-                void reloadReturnList();
-              }}
-            />
-          ))}
+          {page.data.map((task) =>
+            batch.selection.selecting ? (
+              <li key={task.id} className={styles.selectRow}>
+                <RowCheck
+                  selecting
+                  checked={batch.selection.selected.has(task.id)}
+                  onToggle={() => batch.selection.toggle(task.id)}
+                />
+                <button className={styles.itemLink} type="button" onClick={() => batch.selection.toggle(task.id)}>
+                  <span className={styles.itemLinkBody}>
+                    <span>{task.item_name}</span>
+                    <span className={styles.meta}>{task.part_note ?? ""}</span>
+                  </span>
+                </button>
+              </li>
+            ) : (
+              <OpenReturnTaskRow
+                key={task.id}
+                task={task}
+                showItemName
+                onCompleteSuccess={() => {
+                  setNotice("");
+                  setVerifyError("");
+                  void reloadReturnList();
+                }}
+                onRemoveSuccess={() => {
+                  setNotice("");
+                  setVerifyError("");
+                  void reloadReturnList();
+                }}
+                onNotFound={() => handleListTaskNotFound(task.item_id)}
+                onStale={(message) => {
+                  setNotice(message);
+                  void reloadReturnList();
+                }}
+              />
+            ),
+          )}
         </ul>
       ) : null}
       {page ? (
@@ -2606,36 +2726,99 @@ export function ReturnListPage() {
           onPage={(offset) => setParams((current) => setOffsetParam(current, "offset", offset))}
         />
       ) : null}
+      {batch.selection.selecting ? (
+        <BatchBar
+          count={selectedTasks.length}
+          pending={batch.pending}
+          error={batch.error}
+          confirming={batch.confirm ? "complete" : null}
+          confirmText={`完成 ${selectedTasks.length} 条归位，不能撤销`}
+          onConfirm={() => void batch.complete(selectedTasks)}
+          onCancel={() => batch.setConfirm(false)}
+        >
+          <button
+            className={styles.button}
+            type="button"
+            disabled={selectedTasks.length === 0 || batch.pending}
+            onClick={() => batch.setConfirm(true)}
+          >
+            完成归位
+          </button>
+        </BatchBar>
+      ) : null}
     </>
   );
 }
 
-function LocationLinks({ rows, enter }: { rows: Location[]; enter?: boolean }) {
+function LocationLinks({
+  rows,
+  enter,
+  selecting,
+  selected,
+  onToggle,
+}: {
+  rows: Location[];
+  enter?: boolean;
+  selecting?: boolean;
+  selected?: Set<number>;
+  onToggle?: (id: number) => void;
+}) {
   const library = useIconLibrary();
-  const items = rows.map((row) => (
-    <li
-      key={row.id}
-      className={treeDepth(row.path.length) > 0 ? styles.treeChild : undefined}
-      style={treeStyle(row.path.length)}
-    >
-      <Link className={styles.itemLink} to={`/locations/${row.id}`}>
+  const items = rows.map((row) => {
+    const canDelete = locationDeletable(row);
+    const checked = selected?.has(row.id) ?? false;
+    const body = (
+      <>
         <LocationGlyph node={row} library={library.data ?? []} className={styles.rowIcon} />
         <span className={styles.itemLinkBody}>
           <span>{row.name}</span>
           {row.code ? <span className={styles.codeBadge}>{row.code}</span> : null}
-          {row.direct_item_count > 0 ? (
-            <span className={styles.countMuted}>{row.direct_item_count} 件</span>
-          ) : null}
+          {row.direct_item_count > 0 ? <span className={styles.countMuted}>{row.direct_item_count} 件</span> : null}
         </span>
-      </Link>
-    </li>
-  ));
+      </>
+    );
+    return (
+      <li
+        key={row.id}
+        className={`${styles.selectRow} ${treeDepth(row.path.length) > 0 ? styles.treeChild : ""}`}
+        style={treeStyle(row.path.length)}
+      >
+        <RowCheck
+          selecting={Boolean(selecting)}
+          checked={checked}
+          disabled={!canDelete}
+          onToggle={() => {
+            if (canDelete) onToggle?.(row.id);
+          }}
+        />
+        {selecting && canDelete ? (
+          <button className={styles.itemLink} type="button" onClick={() => onToggle?.(row.id)}>
+            {body}
+          </button>
+        ) : (
+          <Link className={styles.itemLink} to={`/locations/${row.id}`}>
+            {body}
+          </Link>
+        )}
+      </li>
+    );
+  });
   const className = `${styles.list} ${styles.treeList}`;
   if (enter) return <StaggerList className={className}>{items}</StaggerList>;
   return <ul className={className}>{items}</ul>;
 }
 
-function LocationGroups({ rows }: { rows: Location[] }) {
+function LocationGroups({
+  rows,
+  selecting,
+  selected,
+  onToggle,
+}: {
+  rows: Location[];
+  selecting?: boolean;
+  selected?: Set<number>;
+  onToggle?: (id: number) => void;
+}) {
   const areas = rows.filter((row) => row.type === "area");
   const containers = rows.filter((row) => row.type !== "area");
   return (
@@ -2643,13 +2826,13 @@ function LocationGroups({ rows }: { rows: Location[] }) {
       {areas.length > 0 ? (
         <section>
           <h2 className={styles.sectionTitle}>区域</h2>
-          <LocationLinks rows={areas} enter />
+          <LocationLinks rows={areas} enter selecting={selecting} selected={selected} onToggle={onToggle} />
         </section>
       ) : null}
       {containers.length > 0 ? (
         <section>
           <h2 className={styles.sectionTitle}>尚未放入的容器</h2>
-          <LocationLinks rows={containers} enter />
+          <LocationLinks rows={containers} enter selecting={selecting} selected={selected} onToggle={onToggle} />
         </section>
       ) : null}
     </>
@@ -2670,19 +2853,39 @@ export function LocationListPage() {
   });
   useOnUnauth(query.error);
   const page = query.data;
+  const batch = useLocationListBatch(offsetRaw ?? "");
+  const deletableIds = (page?.data ?? []).filter(locationDeletable).map((row) => row.id);
+  const selectedRows = (page?.data ?? []).filter((row) => batch.selection.selected.has(row.id));
 
   return (
     <>
       <h1 className={styles.title}>位置</h1>
+      {batch.undo.message ? (
+        <UndoBanner message={batch.undo.message} onUndo={() => void batch.undoDelete()} onDismiss={() => batch.undo.clear()} />
+      ) : null}
       <div className={styles.actions}>
         <Link className={styles.buttonPrimary} to="/locations/new">
           新增
         </Link>
+        <SelectToggle
+          selecting={batch.selection.selecting}
+          onToggle={() => batch.selection.toggleMode()}
+          allSelected={batch.selection.pageAllSelected(deletableIds)}
+          onSelectAll={() => batch.selection.selectAll(deletableIds)}
+          selectAllDisabled={deletableIds.length === 0}
+        />
       </div>
       {query.isLoading ? <Loading /> : null}
       {query.isError ? <LoadError error={query.error} onRetry={() => void query.refetch()} pending={query.isFetching} /> : null}
       {page && page.total === 0 ? <p>还没有位置</p> : null}
-      {page && page.data.length > 0 ? <LocationGroups rows={page.data} /> : null}
+      {page && page.data.length > 0 ? (
+        <LocationGroups
+          rows={page.data}
+          selecting={batch.selection.selecting}
+          selected={batch.selection.selected}
+          onToggle={(id) => batch.selection.toggle(id)}
+        />
+      ) : null}
       {page ? (
         <Pager
           offset={page.offset}
@@ -2691,6 +2894,29 @@ export function LocationListPage() {
           count={page.data.length}
           onPage={(offset) => setParams((current) => setOffsetParam(current, "offset", offset))}
         />
+      ) : null}
+      {batch.selection.selecting ? (
+        <BatchBar
+          count={selectedRows.length}
+          pending={batch.pending}
+          error={batch.error}
+          confirming={batch.confirm ? "delete" : null}
+          confirmText={`永久删除 ${selectedRows.length} 个位置，随后可短时撤销`}
+          onConfirm={() => void batch.remove(selectedRows)}
+          onCancel={() => batch.setConfirm(false)}
+        >
+          <button
+            className={styles.buttonDanger}
+            type="button"
+            disabled={selectedRows.length === 0 || batch.pending}
+            onClick={() => {
+              batch.setError("");
+              batch.setConfirm(true);
+            }}
+          >
+            删除
+          </button>
+        </BatchBar>
       ) : null}
     </>
   );
@@ -2888,6 +3114,8 @@ function LocationScreen({ id }: { id: string }) {
     enabled: loc.isSuccess,
     retry: false,
   });
+  const childBatch = useLocationListBatch(`loc-children:${id}:${childrenRaw ?? ""}`);
+  const itemBatch = useItemListBatch(`loc-items:${id}:${itemsRaw ?? ""}`);
   const [formReady, setFormReady] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -3053,6 +3281,12 @@ function LocationScreen({ id }: { id: string }) {
     <>
       <h1 className={styles.title}>{heading}</h1>
       <Breadcrumb path={record.path} />
+      {childBatch.undo.message ? (
+        <UndoBanner message={childBatch.undo.message} onUndo={() => void childBatch.undoDelete()} onDismiss={() => childBatch.undo.clear()} />
+      ) : null}
+      {itemBatch.undo.message ? (
+        <UndoBanner message={itemBatch.undo.message} onUndo={() => void itemBatch.undoTrash()} onDismiss={() => itemBatch.undo.clear()} />
+      ) : null}
       {record.type === "movable" ? (
         <div className={styles.actions}>
           <button
@@ -3073,13 +3307,31 @@ function LocationScreen({ id }: { id: string }) {
           <Link className={styles.button} to={`/locations/new?parent=${record.id}`}>
             新增子位置
           </Link>
+          <SelectToggle
+            selecting={childBatch.selection.selecting}
+            onToggle={() => childBatch.selection.toggleMode()}
+            allSelected={childBatch.selection.pageAllSelected(
+              (children.data?.data ?? []).filter(locationDeletable).map((row) => row.id),
+            )}
+            onSelectAll={() =>
+              childBatch.selection.selectAll((children.data?.data ?? []).filter(locationDeletable).map((row) => row.id))
+            }
+            selectAllDisabled={(children.data?.data ?? []).filter(locationDeletable).length === 0}
+          />
         </div>
         {children.isLoading ? <Loading /> : null}
         {children.isError ? (
           <LoadError error={children.error} onRetry={() => void children.refetch()} pending={children.isFetching} />
         ) : null}
         {children.data && children.data.total === 0 ? <p>这里还没有下一级位置</p> : null}
-        {children.data && children.data.data.length > 0 ? <LocationLinks rows={children.data.data} /> : null}
+        {children.data && children.data.data.length > 0 ? (
+          <LocationLinks
+            rows={children.data.data}
+            selecting={childBatch.selection.selecting}
+            selected={childBatch.selection.selected}
+            onToggle={(locId) => childBatch.selection.toggle(locId)}
+          />
+        ) : null}
         {children.data ? (
           <Pager
             offset={children.data.offset}
@@ -3089,9 +3341,43 @@ function LocationScreen({ id }: { id: string }) {
             onPage={(offset) => setNamedOffset("children", offset)}
           />
         ) : null}
+        {childBatch.selection.selecting ? (
+          <BatchBar
+            count={(children.data?.data ?? []).filter((row) => childBatch.selection.selected.has(row.id)).length}
+            pending={childBatch.pending}
+            error={childBatch.error}
+            confirming={childBatch.confirm ? "delete" : null}
+            confirmText={`永久删除 ${
+              (children.data?.data ?? []).filter((row) => childBatch.selection.selected.has(row.id)).length
+            } 个位置，随后可短时撤销`}
+            onConfirm={() =>
+              void childBatch.remove((children.data?.data ?? []).filter((row) => childBatch.selection.selected.has(row.id)))
+            }
+            onCancel={() => childBatch.setConfirm(false)}
+          >
+            <button
+              className={styles.buttonDanger}
+              type="button"
+              disabled={(children.data?.data ?? []).filter((row) => childBatch.selection.selected.has(row.id)).length === 0}
+              onClick={() => {
+                childBatch.setError("");
+                childBatch.setConfirm(true);
+              }}
+            >
+              删除
+            </button>
+          </BatchBar>
+        ) : null}
       </section>
       <section>
         <h2 className={styles.sectionTitle}>物品</h2>
+        <SelectToggle
+          selecting={itemBatch.selection.selecting}
+          onToggle={() => itemBatch.selection.toggleMode()}
+          allSelected={itemBatch.selection.pageAllSelected((directItems.data?.data ?? []).map((item) => item.id))}
+          onSelectAll={() => itemBatch.selection.selectAll((directItems.data?.data ?? []).map((item) => item.id))}
+          selectAllDisabled={(directItems.data?.data ?? []).length === 0}
+        />
         {directItems.isLoading ? <Loading /> : null}
         {directItems.isError ? (
           <LoadError error={directItems.error} onRetry={() => void directItems.refetch()} pending={directItems.isFetching} />
@@ -3105,11 +3391,23 @@ function LocationScreen({ id }: { id: string }) {
         {directItems.data && directItems.data.data.length > 0 ? (
           <ul className={styles.list}>
             {directItems.data.data.map((item) => (
-              <li key={item.id}>
-                <Link className={styles.itemLink} to={`/items/${item.id}`}>
-                  <ItemThumb photoId={item.photos[0]?.id} />
-                  <span className={styles.itemLinkBody}>{item.name}</span>
-                </Link>
+              <li key={item.id} className={styles.selectRow}>
+                <RowCheck
+                  selecting={itemBatch.selection.selecting}
+                  checked={itemBatch.selection.selected.has(item.id)}
+                  onToggle={() => itemBatch.selection.toggle(item.id)}
+                />
+                {itemBatch.selection.selecting ? (
+                  <button className={styles.itemLink} type="button" onClick={() => itemBatch.selection.toggle(item.id)}>
+                    <ItemThumb photoId={item.photos[0]?.id} />
+                    <span className={styles.itemLinkBody}>{item.name}</span>
+                  </button>
+                ) : (
+                  <Link className={styles.itemLink} to={`/items/${item.id}`}>
+                    <ItemThumb photoId={item.photos[0]?.id} />
+                    <span className={styles.itemLinkBody}>{item.name}</span>
+                  </Link>
+                )}
               </li>
             ))}
           </ul>
@@ -3122,6 +3420,66 @@ function LocationScreen({ id }: { id: string }) {
             count={directItems.data.data.length}
             onPage={(offset) => setNamedOffset("items", offset)}
           />
+        ) : null}
+        {itemBatch.selection.selecting && itemBatch.picking ? (
+          <LocationPickPanel
+            onPick={(loc) => {
+              itemBatch.setDest(loc);
+              itemBatch.setPicking(false);
+              itemBatch.setConfirm("move");
+            }}
+            onCancel={() => {
+              itemBatch.setPicking(false);
+              itemBatch.setDest(null);
+            }}
+          />
+        ) : null}
+        {itemBatch.selection.selecting && !itemBatch.picking ? (
+          <BatchBar
+            count={(directItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id)).length}
+            pending={itemBatch.pending}
+            error={itemBatch.error}
+            confirming={itemBatch.confirm === "trash" ? "trash" : itemBatch.confirm === "move" ? "move" : null}
+            confirmText={
+              itemBatch.confirm === "trash"
+                ? `将 ${(directItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id)).length} 件物品移到回收站`
+                : itemBatch.confirm === "move" && itemBatch.dest
+                  ? `将物品搬到 ${itemBatch.dest.name}${itemBatch.dest.code ? ` ${itemBatch.dest.code}` : ""}，原来的位置清掉`
+                  : undefined
+            }
+            onConfirm={() => {
+              const picked = (directItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id));
+              if (itemBatch.confirm === "trash") void itemBatch.trash(picked);
+              if (itemBatch.confirm === "move" && itemBatch.dest) void itemBatch.move(picked, itemBatch.dest);
+            }}
+            onCancel={() => {
+              itemBatch.setConfirm(null);
+              itemBatch.setDest(null);
+            }}
+          >
+            <button
+              className={styles.buttonDanger}
+              type="button"
+              disabled={(directItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id)).length === 0}
+              onClick={() => {
+                itemBatch.setError("");
+                itemBatch.setConfirm("trash");
+              }}
+            >
+              移到回收站
+            </button>
+            <button
+              className={styles.button}
+              type="button"
+              disabled={(directItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id)).length === 0}
+              onClick={() => {
+                itemBatch.setError("");
+                itemBatch.setPicking(true);
+              }}
+            >
+              放入位置
+            </button>
+          </BatchBar>
         ) : null}
         <form onSubmit={onQuick}>
           <TextField label="名称" name="quick-name" value={quickName} onChange={setQuickName} error={fieldText(quickError, "name")} />
@@ -3436,6 +3794,7 @@ function CategoryScreen({ id }: { id: string }) {
     enabled: cat.isSuccess,
     retry: false,
   });
+  const itemBatch = useItemListBatch(`cat-items:${id}:${selfOnly ? "0" : ""}:${itemsRaw ?? ""}`);
   const [formReady, setFormReady] = useState(false);
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState<number | null>(null);
@@ -3569,6 +3928,9 @@ function CategoryScreen({ id }: { id: string }) {
     <>
       <h1 className={styles.title}>{name}</h1>
       <CategoryBreadcrumb path={record.path} />
+      {itemBatch.undo.message ? (
+        <UndoBanner message={itemBatch.undo.message} onUndo={() => void itemBatch.undoTrash()} onDismiss={() => itemBatch.undo.clear()} />
+      ) : null}
       <section>
         <h2 className={styles.sectionTitle}>子分类</h2>
         <div className={styles.actions}>
@@ -3601,6 +3963,13 @@ function CategoryScreen({ id }: { id: string }) {
           <button className={styles.button} type="button" onClick={() => setSelfOnly(!selfOnly)}>
             {selfOnly ? "含下级" : "仅当前分类"}
           </button>
+          <SelectToggle
+            selecting={itemBatch.selection.selecting}
+            onToggle={() => itemBatch.selection.toggleMode()}
+            allSelected={itemBatch.selection.pageAllSelected((branchItems.data?.data ?? []).map((item) => item.id))}
+            onSelectAll={() => itemBatch.selection.selectAll((branchItems.data?.data ?? []).map((item) => item.id))}
+            selectAllDisabled={(branchItems.data?.data ?? []).length === 0}
+          />
         </div>
         {branchItems.isLoading ? <Loading /> : null}
         {branchItems.isError ? (
@@ -3615,11 +3984,23 @@ function CategoryScreen({ id }: { id: string }) {
         {branchItems.data && branchItems.data.data.length > 0 ? (
           <ul className={styles.list}>
             {branchItems.data.data.map((item) => (
-              <li key={item.id}>
-                <Link className={styles.itemLink} to={`/items/${item.id}`}>
-                  <ItemThumb photoId={item.photos[0]?.id} />
-                  <span className={styles.itemLinkBody}>{item.name}</span>
-                </Link>
+              <li key={item.id} className={styles.selectRow}>
+                <RowCheck
+                  selecting={itemBatch.selection.selecting}
+                  checked={itemBatch.selection.selected.has(item.id)}
+                  onToggle={() => itemBatch.selection.toggle(item.id)}
+                />
+                {itemBatch.selection.selecting ? (
+                  <button className={styles.itemLink} type="button" onClick={() => itemBatch.selection.toggle(item.id)}>
+                    <ItemThumb photoId={item.photos[0]?.id} />
+                    <span className={styles.itemLinkBody}>{item.name}</span>
+                  </button>
+                ) : (
+                  <Link className={styles.itemLink} to={`/items/${item.id}`}>
+                    <ItemThumb photoId={item.photos[0]?.id} />
+                    <span className={styles.itemLinkBody}>{item.name}</span>
+                  </Link>
+                )}
               </li>
             ))}
           </ul>
@@ -3632,6 +4013,66 @@ function CategoryScreen({ id }: { id: string }) {
             count={branchItems.data.data.length}
             onPage={(offset) => setNamedOffset("items", offset)}
           />
+        ) : null}
+        {itemBatch.selection.selecting && itemBatch.picking ? (
+          <LocationPickPanel
+            onPick={(loc) => {
+              itemBatch.setDest(loc);
+              itemBatch.setPicking(false);
+              itemBatch.setConfirm("move");
+            }}
+            onCancel={() => {
+              itemBatch.setPicking(false);
+              itemBatch.setDest(null);
+            }}
+          />
+        ) : null}
+        {itemBatch.selection.selecting && !itemBatch.picking ? (
+          <BatchBar
+            count={(branchItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id)).length}
+            pending={itemBatch.pending}
+            error={itemBatch.error}
+            confirming={itemBatch.confirm === "trash" ? "trash" : itemBatch.confirm === "move" ? "move" : null}
+            confirmText={
+              itemBatch.confirm === "trash"
+                ? `将 ${(branchItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id)).length} 件物品移到回收站`
+                : itemBatch.confirm === "move" && itemBatch.dest
+                  ? `将物品搬到 ${itemBatch.dest.name}${itemBatch.dest.code ? ` ${itemBatch.dest.code}` : ""}，原来的位置清掉`
+                  : undefined
+            }
+            onConfirm={() => {
+              const picked = (branchItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id));
+              if (itemBatch.confirm === "trash") void itemBatch.trash(picked);
+              if (itemBatch.confirm === "move" && itemBatch.dest) void itemBatch.move(picked, itemBatch.dest);
+            }}
+            onCancel={() => {
+              itemBatch.setConfirm(null);
+              itemBatch.setDest(null);
+            }}
+          >
+            <button
+              className={styles.buttonDanger}
+              type="button"
+              disabled={(branchItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id)).length === 0}
+              onClick={() => {
+                itemBatch.setError("");
+                itemBatch.setConfirm("trash");
+              }}
+            >
+              移到回收站
+            </button>
+            <button
+              className={styles.button}
+              type="button"
+              disabled={(branchItems.data?.data ?? []).filter((item) => itemBatch.selection.selected.has(item.id)).length === 0}
+              onClick={() => {
+                itemBatch.setError("");
+                itemBatch.setPicking(true);
+              }}
+            >
+              放入位置
+            </button>
+          </BatchBar>
         ) : null}
       </section>
       <form onSubmit={onSave}>
@@ -3695,23 +4136,48 @@ export function TrashListPage() {
     }
   }, [page, offsetRaw, setParams]);
 
+  const batch = useTrashListBatch(offsetRaw ?? "");
+  const selectedItems = (page?.data ?? []).filter((item) => batch.selection.selected.has(item.id));
+
   return (
     <>
       <h1 className={styles.title}>回收站</h1>
+      <SelectToggle
+        selecting={batch.selection.selecting}
+        onToggle={() => batch.selection.toggleMode()}
+        allSelected={batch.selection.pageAllSelected((page?.data ?? []).map((item) => item.id))}
+        onSelectAll={() => batch.selection.selectAll((page?.data ?? []).map((item) => item.id))}
+        selectAllDisabled={!page || page.data.length === 0}
+      />
       {query.isLoading ? <Loading /> : null}
       {query.isError ? <LoadError error={query.error} onRetry={() => void query.refetch()} pending={query.isFetching} /> : null}
       {page && page.total === 0 ? <p>回收站是空的</p> : null}
       {page && page.data.length > 0 ? (
         <ul className={styles.list}>
           {page.data.map((item) => (
-            <li key={item.id}>
-              <Link className={styles.itemLink} to={`/trash/${item.id}`}>
-                <ItemThumb photoId={item.photos[0]?.id} />
-                <span className={styles.itemLinkBody}>
-                  <span>{item.name}</span>
-                  <span className={styles.meta}>{item.deleted_at ?? ""}</span>
-                </span>
-              </Link>
+            <li key={item.id} className={styles.selectRow}>
+              <RowCheck
+                selecting={batch.selection.selecting}
+                checked={batch.selection.selected.has(item.id)}
+                onToggle={() => batch.selection.toggle(item.id)}
+              />
+              {batch.selection.selecting ? (
+                <button className={styles.itemLink} type="button" onClick={() => batch.selection.toggle(item.id)}>
+                  <ItemThumb photoId={item.photos[0]?.id} />
+                  <span className={styles.itemLinkBody}>
+                    <span>{item.name}</span>
+                    <span className={styles.meta}>{item.deleted_at ?? ""}</span>
+                  </span>
+                </button>
+              ) : (
+                <Link className={styles.itemLink} to={`/trash/${item.id}`}>
+                  <ItemThumb photoId={item.photos[0]?.id} />
+                  <span className={styles.itemLinkBody}>
+                    <span>{item.name}</span>
+                    <span className={styles.meta}>{item.deleted_at ?? ""}</span>
+                  </span>
+                </Link>
+              )}
             </li>
           ))}
         </ul>
@@ -3724,6 +4190,26 @@ export function TrashListPage() {
           count={page.data.length}
           onPage={(offset) => setParams((current) => setOffsetParam(current, "offset", offset))}
         />
+      ) : null}
+      {batch.selection.selecting ? (
+        <BatchBar
+          count={selectedItems.length}
+          pending={batch.pending}
+          error={batch.error}
+          confirming={batch.confirm ? "restore" : null}
+          confirmText={`恢复 ${selectedItems.length} 件物品`}
+          onConfirm={() => void batch.restore(selectedItems)}
+          onCancel={() => batch.setConfirm(false)}
+        >
+          <button
+            className={styles.button}
+            type="button"
+            disabled={selectedItems.length === 0 || batch.pending}
+            onClick={() => batch.setConfirm(true)}
+          >
+            恢复
+          </button>
+        </BatchBar>
       ) : null}
     </>
   );

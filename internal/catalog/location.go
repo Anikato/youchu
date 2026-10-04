@@ -53,6 +53,7 @@ type Location struct {
 	UpdatedAt       string
 	Path            []PathNode
 	DirectItemCount int
+	ChildCount      int
 }
 
 type PathNode struct {
@@ -569,6 +570,9 @@ func ListLocations(ctx context.Context, db *sql.DB, f ListFilter) (ListResult, e
 			if err := loadLocationDirectCount(ctx, conn, &locs[i]); err != nil {
 				return err
 			}
+			if err := loadLocationChildCount(ctx, conn, &locs[i]); err != nil {
+				return err
+			}
 		}
 		result.Locations = locs
 		return nil
@@ -734,11 +738,18 @@ func loadLocation(ctx context.Context, conn *sql.Conn, id int64) (Location, erro
 	if err := loadLocationDirectCount(ctx, conn, &loc); err != nil {
 		return Location{}, err
 	}
+	if err := loadLocationChildCount(ctx, conn, &loc); err != nil {
+		return Location{}, err
+	}
 	return loc, nil
 }
 
 func loadLocationDirectCount(ctx context.Context, conn *sql.Conn, loc *Location) error {
 	return conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM item_locations WHERE location_id = ?`, loc.ID).Scan(&loc.DirectItemCount)
+}
+
+func loadLocationChildCount(ctx context.Context, conn *sql.Conn, loc *Location) error {
+	return conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM locations WHERE parent_id = ?`, loc.ID).Scan(&loc.ChildCount)
 }
 
 func scanLocation(sc rowScanner) (Location, error) {

@@ -496,6 +496,7 @@ type locBody struct {
 		CustomIconID *int64  `json:"custom_icon_id"`
 	} `json:"path"`
 	DirectItemCount int `json:"direct_item_count"`
+	ChildCount      int `json:"child_count"`
 }
 
 type pageBody struct {
@@ -1349,6 +1350,65 @@ func TestDeleteLocation(t *testing.T) {
 	assertError(t, rec, http.StatusForbidden, "origin_rejected", "来源不被接受")
 	if locationCount(t, db) < 4 {
 		t.Fatalf("locations=%d", locationCount(t, db))
+	}
+}
+
+func TestLocationChildCount(t *testing.T) {
+	_, h, _ := testHandler(t, false)
+	cookie := login(t, h)
+	root := mustCreate(t, h, cookie, `{"name":"客厅","type":"area"}`)
+	if root.ChildCount != 0 {
+		t.Fatalf("new child_count=%d", root.ChildCount)
+	}
+	assertChildCountJSON(t, getLoc(h, cookie, locURL(root.ID)), 0)
+
+	cabinet := mustCreate(t, h, cookie, fmt.Sprintf(`{"name":"柜","type":"fixed","code":"C1","parent_id":%d}`, root.ID))
+	cell := mustCreate(t, h, cookie, fmt.Sprintf(`{"name":"格","type":"fixed","code":"C101","parent_id":%d}`, cabinet.ID))
+	if cell.ChildCount != 0 {
+		t.Fatalf("leaf child_count=%d", cell.ChildCount)
+	}
+	gotRoot := requireLoc(t, h, cookie, root.ID)
+	if gotRoot.ChildCount != 1 {
+		t.Fatalf("root child_count=%d want 1", gotRoot.ChildCount)
+	}
+	gotCab := requireLoc(t, h, cookie, cabinet.ID)
+	if gotCab.ChildCount != 1 {
+		t.Fatalf("cabinet child_count=%d want 1", gotCab.ChildCount)
+	}
+	assertChildCountJSON(t, getLoc(h, cookie, locURL(root.ID)), 1)
+
+	item := mustItem(t, h, cookie, fmt.Sprintf(`{"name":"杯","locations":[{"location_id":%d}]}`, root.ID))
+	if item.ID < 1 {
+		t.Fatal("item")
+	}
+	occupied := requireLoc(t, h, cookie, root.ID)
+	if occupied.ChildCount != 1 || occupied.DirectItemCount != 1 {
+		t.Fatalf("occupied=%+v", occupied)
+	}
+
+	listed := decodePage(t, getLoc(h, cookie, "/api/v1/locations?flat=1&limit=100"))
+	var sawRoot, sawCab, sawCell bool
+	for _, loc := range listed.Data {
+		switch loc.ID {
+		case root.ID:
+			sawRoot = true
+			if loc.ChildCount != 1 {
+				t.Fatalf("list root child_count=%d", loc.ChildCount)
+			}
+		case cabinet.ID:
+			sawCab = true
+			if loc.ChildCount != 1 {
+				t.Fatalf("list cabinet child_count=%d", loc.ChildCount)
+			}
+		case cell.ID:
+			sawCell = true
+			if loc.ChildCount != 0 {
+				t.Fatalf("list cell child_count=%d", loc.ChildCount)
+			}
+		}
+	}
+	if !sawRoot || !sawCab || !sawCell {
+		t.Fatalf("missing rows sawRoot=%v sawCab=%v sawCell=%v", sawRoot, sawCab, sawCell)
 	}
 }
 
@@ -3028,6 +3088,17 @@ func assertDirectItemCountJSON(t *testing.T, rec *httptest.ResponseRecorder, got
 		t.Fatalf("direct_item_count=%d want %d body=%s", got, want, rec.Body.String())
 	}
 	needle := fmt.Sprintf(`"direct_item_count":%d`, want)
+	if !strings.Contains(rec.Body.String(), needle) {
+		t.Fatalf("missing %s in %s", needle, rec.Body.String())
+	}
+}
+
+func assertChildCountJSON(t *testing.T, rec *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	needle := fmt.Sprintf(`"child_count":%d`, want)
 	if !strings.Contains(rec.Body.String(), needle) {
 		t.Fatalf("missing %s in %s", needle, rec.Body.String())
 	}

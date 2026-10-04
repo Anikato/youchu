@@ -1,5 +1,8 @@
 export type ItemListSort = "created_at" | "name";
 
+export const ITEM_PAGE_SIZES = [30, 50, 100] as const;
+export type ItemPageSize = (typeof ITEM_PAGE_SIZES)[number];
+
 export type ItemListState = {
   q: string;
   unlocated: boolean;
@@ -11,7 +14,24 @@ export type ItemListState = {
   uncategorized: boolean;
   sort: ItemListSort;
   offset: string;
+  limit: ItemPageSize;
 };
+
+export function readItemPageSize(raw: string | null): ItemPageSize {
+  if (raw === "50" || raw === "100") return Number(raw) as ItemPageSize;
+  return 30;
+}
+
+export function pageIndex(offset: number, limit: number): number {
+  const step = limit > 0 ? limit : 30;
+  return Math.floor(Math.max(0, offset) / step) + 1;
+}
+
+export function pageCount(total: number, limit: number): number {
+  const step = limit > 0 ? limit : 30;
+  if (total <= 0) return 0;
+  return Math.ceil(total / step);
+}
 
 export function readItemList(params: URLSearchParams): ItemListState {
   const categoryRaw = params.get("category") ?? "";
@@ -27,6 +47,7 @@ export function readItemList(params: URLSearchParams): ItemListState {
     uncategorized: params.get("uncategorized") === "1",
     sort: params.get("sort") === "name" ? "name" : "created_at",
     offset: params.get("offset") ?? "",
+    limit: readItemPageSize(params.get("limit")),
   };
 }
 
@@ -70,6 +91,7 @@ export function writeItemList(state: ItemListState): URLSearchParams {
     if (next.categorySelf) params.set("category_descendants", "0");
   }
   if (next.sort === "name") params.set("sort", "name");
+  if (next.limit === 50 || next.limit === 100) params.set("limit", String(next.limit));
   if (next.offset !== "" && next.offset !== "0") params.set("offset", next.offset);
   return params;
 }

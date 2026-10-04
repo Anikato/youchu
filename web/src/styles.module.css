@@ -273,6 +273,16 @@ a.buttonPrimary {
   overflow-wrap: anywhere;
 }
 
+button.itemLink {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+
 .itemLink .path {
   color: var(--ink-muted);
 }
@@ -549,6 +559,16 @@ a.buttonPrimary {
 .rowIcon { width: 1.5rem; height: 1.5rem; flex: none; color: var(--clay); }
 .codeBadge { display: inline-block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; font-weight: 500; padding: .1rem .4rem; margin-left: .35rem; border: 1px solid var(--line); border-radius: .3rem; vertical-align: .05em; }
 .countMuted { color: var(--ink-muted); font-weight: 400; font-size: .875rem; margin-left: .4rem; }
+.selectRow { display: flex; align-items: flex-start; gap: .5rem; min-width: 0; }
+.selectRow > input[type="checkbox"] { flex: none; width: 1.15rem; height: 1.15rem; margin: .85rem 0 0; }
+.selectRow .itemLink { flex: 1; min-width: 0; }
+.pager { margin: 1rem 0; min-width: 0; }
+.pageMeta { margin: 0 0 .5rem; color: var(--ink-muted); }
+.undoBanner { display: grid; gap: .5rem; padding: .85rem 1rem; margin: 0 0 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--paper-raised); min-width: 0; }
+.undoBanner p { margin: 0; }
+.batchBarSpacer { display: none; }
+.batchBar { margin: 1rem 0 0; padding: .85rem 0 0; border-top: 1px solid var(--line); min-width: 0; }
+.locationPick { min-width: 0; margin: .75rem 0; }
 .pathWithIcon { display: flex; align-items: flex-start; gap: .35rem; min-width: 0; }
 .pathWithIcon svg { flex: none; width: 1.1rem; height: 1.1rem; margin-top: .15rem; color: var(--clay); }
 .choiceRow { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
@@ -615,6 +635,20 @@ a.buttonPrimary {
     box-shadow: 0 -4px 20px color-mix(in srgb, var(--ink) 8%, transparent);
   }
   .stickySave .buttonPrimary { width: 100%; }
+  .batchBarSpacer { display: block; height: 7.5rem; }
+  .batchBar {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(3.6rem + env(safe-area-inset-bottom));
+    z-index: 21;
+    margin: 0;
+    padding: 0.6rem 1rem;
+    background: var(--paper-raised);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 20px color-mix(in srgb, var(--ink) 8%, transparent);
+  }
   .header { margin: -1.25rem -1rem 1.5rem; padding: .65rem 1rem; }
   .brand { font-size: 1.4rem; }
   .nav { position: fixed; bottom: 0; left: 0; right: 0; padding: .4rem .5rem calc(.4rem + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--paper-raised); border-top: 1px solid var(--line); box-shadow: 0 -4px 20px color-mix(in srgb, var(--ink) 8%, transparent); }

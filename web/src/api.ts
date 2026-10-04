@@ -36,6 +36,7 @@ export type Location = {
   updated_at: string;
   path: PathNode[];
   direct_item_count: number;
+  child_count: number;
 };
 
 export type LocationIconRecord = {
@@ -279,6 +280,7 @@ function normalizeLocation(loc: Location): Location {
     custom_icon_id: loc.custom_icon_id ?? null,
     path: Array.isArray(loc.path) ? loc.path.map(normalizePathNode) : [],
     direct_item_count: loc.direct_item_count ?? 0,
+    child_count: loc.child_count ?? 0,
   };
 }
 

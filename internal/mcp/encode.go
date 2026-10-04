@@ -24,6 +24,7 @@ type locationJSON struct {
 	UpdatedAt       string     `json:"updated_at"`
 	Path            []pathJSON `json:"path"`
 	DirectItemCount int        `json:"direct_item_count"`
+	ChildCount      int        `json:"child_count"`
 }
 
 type locationIconJSON struct {
@@ -164,6 +165,7 @@ func toLocationJSON(loc catalog.Location) locationJSON {
 		UpdatedAt:       loc.UpdatedAt,
 		Path:            path,
 		DirectItemCount: loc.DirectItemCount,
+		ChildCount:      loc.ChildCount,
 	}
 }
 

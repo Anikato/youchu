@@ -95,6 +95,7 @@ import { ItemSummary, NavIcon, PageHeading } from './catalogUi';
 import { searchLocations } from './uiModel';
 import { pendingUpload, uploadBatch } from './uploadBatch';
 import { formatAddedAt } from './relativeTime';
+import { Dialog } from './dialog';
 
 const typeLabel: Record<LocationType, string> = {
   area: "区域",
@@ -208,12 +209,14 @@ function IconPicker({
   const library = useIconLibrary();
   const queryClient = useQueryClient();
   const [uploadError, setUploadError] = useState("");
+  const [uploadDraft, setUploadDraft] = useState<{name: string; svg: string} | null>(null);
   const upload = useMutation({
     mutationFn: (input: { name: string; svg: string }) => createLocationIcon(input.name, input.svg),
     onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: ["location-icons"] });
       onChange(null, created.id);
       setUploadError("");
+      setUploadDraft(null);
     },
     onError: (error) => {
       const api = asApiError(error, "无法上传图标");
@@ -226,9 +229,9 @@ function IconPicker({
 
   async function onFile(file: File | undefined) {
     if (!file) return;
-    const svg = await file.text();
-    const base = file.name.replace(/\.svg$/i, "").trim() || "图标";
-    upload.mutate({ name: base, svg });
+    setUploadError('');
+    try { setUploadDraft({name: file.name.replace(/\.svg$/i, "").trim() || "图标", svg: await file.text()}); }
+    catch { setUploadError('无法读取文件，请重新选择'); }
   }
 
   return (
@@ -261,7 +264,7 @@ function IconPicker({
           </div>
         </div>
       ))}
-      <p className={styles.iconGroupLabel}>我的</p>
+      <p className={styles.iconGroupLabel}>自定义图标</p>
       <div className={styles.iconGrid}>
         {mine.map((icon) => (
           <label
@@ -294,6 +297,12 @@ function IconPicker({
       </label>
       {uploadError ? <span className={styles.error}>{uploadError}</span> : null}
       {error ? <span className={styles.error}>{error}</span> : null}
+      {uploadDraft ? <Dialog title="预览上传图标" onClose={()=>setUploadDraft(null)} busy={upload.isPending}>
+        <img className={styles.uploadPreview} src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(uploadDraft.svg)}`} alt="待上传图标预览"/>
+        <label className={styles.field}>图标名称<input required disabled={upload.isPending} value={uploadDraft.name} onChange={event=>setUploadDraft({...uploadDraft,name:event.target.value})}/></label>
+        {uploadError ? <p className={styles.error} role="alert">{uploadError}</p> : null}
+        <div className={styles.actions}><button className={styles.button} data-dialog-cancel type="button" disabled={upload.isPending} onClick={()=>setUploadDraft(null)}>取消</button><button className={styles.buttonPrimary} type="button" disabled={upload.isPending || !uploadDraft.name.trim()} onClick={()=>upload.mutate(uploadDraft)}>上传并选用</button></div>
+      </Dialog> : null}
     </fieldset>
   );
 }
@@ -489,11 +498,11 @@ function AppShell({ username }: { username: string }) {
             <NavIcon name="returns"/><span>待归位</span>
           </Link>
         </nav>
-        <Link className={styles.user} to="/account" aria-current={pathname === "/account" ? "page" : undefined}>
-          <NavIcon name="account"/><span>{username}</span>
+        <Link className={styles.user} to="/account" aria-label="设置" aria-current={pathname.startsWith("/account") ? "page" : undefined}>
+          <NavIcon name="account"/><span>{username} · 设置</span>
         </Link>
       </header>
-      {notice ? <p>{notice}</p> : null}
+      {notice ? <p className={styles.inlineNotice} role="status">{notice}</p> : null}
       <PageEnter pathname={pathname} className={styles.pageEnter}>
         <Outlet />
       </PageEnter>
@@ -527,7 +536,7 @@ function FormIssues({ error }: { error: ApiError | null }) {
   if (!error) return null;
   const extra = Object.entries(error.fields ?? {}).filter(([key]) => !inlineFields.has(key));
   return (
-    <div>
+    <div role="alert">
       <p className={styles.error}>{error.message}</p>
       {extra.map(([key, text]) => (
         <p key={key} className={styles.error}>
@@ -583,7 +592,7 @@ function scrollToFormError() {
   });
 }
 
-function Breadcrumb({ path }: { path: PathNode[] }) {
+function Breadcrumb({ path, from }: { path: PathNode[]; from?: string }) {
   return (
     <p className={styles.path}>
       {path.map((node, index) => {
@@ -591,7 +600,7 @@ function Breadcrumb({ path }: { path: PathNode[] }) {
         return (
           <span key={node.id}>
             {index > 0 ? " / " : null}
-            {last ? formatNode(node) : <Link to={`/locations/${node.id}`}>{formatNode(node)}</Link>}
+            {last ? formatNode(node) : <Link to={`/locations/${node.id}`} state={from ? {from} : undefined}>{formatNode(node)}</Link>}
           </span>
         );
       })}
@@ -666,18 +675,18 @@ function DeleteConfirm({
     );
   }
   return (
-    <div className={styles.confirm}>
+    <Dialog title={askLabel === '删除' ? '确认删除' : askLabel} onClose={onCancel} busy={pending}>
       <p>{warning}</p>
       <div className={styles.actions}>
         <button className={styles.buttonDanger} type="button" onClick={onConfirm} disabled={pending}>
-          {confirmLabel}
+          {pending ? '正在处理…' : confirmLabel}
         </button>
-        <button className={styles.button} type="button" onClick={onCancel}>
+        <button className={styles.button} data-dialog-cancel type="button" disabled={pending} onClick={onCancel}>
           取消
         </button>
       </div>
       <FormIssues error={error} />
-    </div>
+    </Dialog>
   );
 }
 
@@ -1467,7 +1476,7 @@ export function ItemListPage() {
     <>
       <PageHeading title="家里的东西" description="知道有什么，也知道在哪里。" action={<Link className={styles.buttonPrimary} to="/items/new">＋ 记一件</Link>}/>
       {batch.undo.message ? (
-        <UndoBanner message={batch.undo.message} onUndo={() => void batch.undoTrash()} onDismiss={() => batch.undo.clear()} />
+        <UndoBanner message={batch.undo.message} onUndo={batch.canUndo ? () => void batch.undoTrash() : undefined} onDismiss={() => batch.undo.clear()} />
       ) : null}
       <form
         className={styles.searchRow}
@@ -1733,6 +1742,7 @@ export function ItemListPage() {
           {page.data.map((item) => (
             <li key={item.id} className={styles.selectRow}>
               <RowCheck
+                label={item.name}
                 selecting={batch.selection.selecting}
                 checked={batch.selection.selected.has(item.id)}
                 onToggle={() => batch.selection.toggle(item.id)}
@@ -1818,7 +1828,7 @@ export function ItemListPage() {
               batch.setPicking(true);
             }}
           >
-            放入位置
+            更换存放位置
           </button>
         </BatchBar>
       ) : null}
@@ -2100,7 +2110,7 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
       <PageHeading title="记下家里的东西" description="只填名称就能保存，其他信息慢慢补。" action={<Link className={styles.button} to="/">返回目录</Link>}/>
       {failedUpload ? <div className={styles.uploadNotice} role="alert"><p><Link to={`/items/${failedUpload.id}`}>{failedUpload.name}</Link>已保存，{failedUpload.files.length} 张照片未上传。</p>{retryPhotoError ? <p className={styles.error}>{retryPhotoError}</p> : null}<div className={styles.actions}><button className={styles.button} type="button" disabled={saving} onClick={()=>void retryPhotos()}>{retryingPhotos ? '正在重试…' : '重试未上传照片'}</button><button className={styles.chip} type="button" disabled={saving} onClick={()=>setFailedUpload(null)}>放弃这几张照片</button><button className={styles.chip} type="button" disabled={saving} onClick={()=>{pendingUpload.current=failedUpload;queryClient.setQueryData(['me'],null);navigate('/login');}}>重新登录</button></div><p className={styles.meta}>照片暂存在当前标签页；重新登录后打开「记一件」可继续上传。刷新或关闭页面前请先处理。</p></div> : null}
       {saveNotice ? (
-        <p>
+        <p className={styles.inlineNotice} role="status">
           已保存：
           <Link to={`/items/${saveNotice.id}`}>{saveNotice.name}</Link>
           {saveNotice.photoFail ? "，有照片没传上" : null}
@@ -2500,7 +2510,7 @@ function ItemEditForm({ id }: { id: string }) {
     <>
       <LeaveGuard dirty={JSON.stringify(draft) !== baseline} />
       <PageHeading title="编辑物品" description={draft.name} action={<Link className={styles.button} to={`/items/${id}`} state={{from}}>返回详情</Link>}/>
-      {saveNotice ? <p>{saveNotice}</p> : null}
+      {saveNotice ? <p className={styles.inlineNotice} role="status">{saveNotice}</p> : null}
       <form id="item-save-form" className={styles.editor} onSubmit={onSubmit}>
         <ItemFields draft={draft} onChange={setDraft} error={formError} extrasOpen={extrasOpen} nameRef={nameRef} />
         <FormIssues error={formError} />
@@ -2709,6 +2719,7 @@ export function ReturnListPage() {
             batch.selection.selecting ? (
               <li key={task.id} className={styles.selectRow}>
                 <RowCheck
+                  label={task.item_name}
                   selecting
                   checked={batch.selection.selected.has(task.id)}
                   onToggle={() => batch.selection.toggle(task.id)}
@@ -2781,12 +2792,14 @@ export function ReturnListPage() {
 function LocationLinks({
   rows,
   enter,
+  from,
   selecting,
   selected,
   onToggle,
 }: {
   rows: Location[];
   enter?: boolean;
+  from?: string;
   selecting?: boolean;
   selected?: Set<number>;
   onToggle?: (id: number) => void;
@@ -2812,6 +2825,7 @@ function LocationLinks({
         style={treeStyle(row.path.length)}
       >
         <RowCheck
+          label={row.name}
           selecting={Boolean(selecting)}
           checked={checked}
           disabled={!canDelete}
@@ -2824,7 +2838,7 @@ function LocationLinks({
             {body}
           </button>
         ) : (
-          <Link className={styles.itemLink} to={`/locations/${row.id}`}>
+          <Link className={styles.itemLink} to={`/locations/${row.id}`} state={from ? {from} : undefined}>
             {body}
           </Link>
         )}
@@ -3111,6 +3125,8 @@ export function LocationPage() {
 
 function LocationScreen({ id }: { id: string }) {
   const navigate = useNavigate();
+  const route = useLocation();
+  const from = typeof route.state?.from === 'string' && route.state.from.startsWith('/locations?') ? route.state.from : '/locations';
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
   const childrenRaw = params.get("children");
@@ -3309,13 +3325,14 @@ function LocationScreen({ id }: { id: string }) {
 
   return (
     <>
+      <Link className={styles.subtleLink} to={from}>← 返回位置目录</Link>
       <PageHeading title={heading} action={<Link className={styles.buttonPrimary} to={`/items/new?location=${id}`}>＋ 在这里记一件</Link>}/>
-      <Breadcrumb path={record.path} />
+      <Breadcrumb path={record.path} from={from}/>
       {childBatch.undo.message ? (
         <UndoBanner message={childBatch.undo.message} onUndo={() => void childBatch.undoDelete()} onDismiss={() => childBatch.undo.clear()} />
       ) : null}
       {itemBatch.undo.message ? (
-        <UndoBanner message={itemBatch.undo.message} onUndo={() => void itemBatch.undoTrash()} onDismiss={() => itemBatch.undo.clear()} />
+        <UndoBanner message={itemBatch.undo.message} onUndo={itemBatch.canUndo ? () => void itemBatch.undoTrash() : undefined} onDismiss={() => itemBatch.undo.clear()} />
       ) : null}
       {record.type === "movable" ? (
         <div className={styles.actions}>
@@ -3329,7 +3346,7 @@ function LocationScreen({ id }: { id: string }) {
           </button>
         </div>
       ) : null}
-      {cloneNotice ? <p>{cloneNotice}</p> : null}
+      {cloneNotice ? <p className={styles.inlineNotice} role="status">{cloneNotice}</p> : null}
       {childBatch.error ? <p role="alert" className={styles.inlineNotice}>{childBatch.error}</p> : null}
       {cloneError ? <p className={styles.error}>{cloneError}</p> : null}
       <section>
@@ -3358,6 +3375,7 @@ function LocationScreen({ id }: { id: string }) {
         {children.data && children.data.data.length > 0 ? (
           <LocationLinks
             rows={children.data.data}
+            from={from}
             selecting={childBatch.selection.selecting}
             selected={childBatch.selection.selected}
             onToggle={(locId) => childBatch.selection.toggle(locId)}
@@ -3429,6 +3447,7 @@ function LocationScreen({ id }: { id: string }) {
             {directItems.data.data.map((item) => (
               <li key={item.id} className={styles.selectRow}>
                 <RowCheck
+                  label={item.name}
                   selecting={itemBatch.selection.selecting}
                   checked={itemBatch.selection.selected.has(item.id)}
                   onToggle={() => itemBatch.selection.toggle(item.id)}
@@ -3511,7 +3530,7 @@ function LocationScreen({ id }: { id: string }) {
                 itemBatch.setPicking(true);
               }}
             >
-              放入位置
+              更换存放位置
             </button>
           </BatchBar>
         ) : null}
@@ -3968,7 +3987,7 @@ function CategoryScreen({ id }: { id: string }) {
       <CategoryBreadcrumb path={record.path} />
       {itemBatch.error ? <p role="alert" className={styles.inlineNotice}>{itemBatch.error}</p> : null}
       {itemBatch.undo.message ? (
-        <UndoBanner message={itemBatch.undo.message} onUndo={() => void itemBatch.undoTrash()} onDismiss={() => itemBatch.undo.clear()} />
+        <UndoBanner message={itemBatch.undo.message} onUndo={itemBatch.canUndo ? () => void itemBatch.undoTrash() : undefined} onDismiss={() => itemBatch.undo.clear()} />
       ) : null}
       <section>
         <h2 className={styles.sectionTitle}>子分类</h2>
@@ -4025,6 +4044,7 @@ function CategoryScreen({ id }: { id: string }) {
             {branchItems.data.data.map((item) => (
               <li key={item.id} className={styles.selectRow}>
                 <RowCheck
+                  label={item.name}
                   selecting={itemBatch.selection.selecting}
                   checked={itemBatch.selection.selected.has(item.id)}
                   onToggle={() => itemBatch.selection.toggle(item.id)}
@@ -4107,7 +4127,7 @@ function CategoryScreen({ id }: { id: string }) {
                 itemBatch.setPicking(true);
               }}
             >
-              放入位置
+              更换存放位置
             </button>
           </BatchBar>
         ) : null}
@@ -4197,6 +4217,7 @@ export function TrashListPage() {
           {page.data.map((item) => (
             <li key={item.id} className={styles.selectRow}>
               <RowCheck
+                label={item.name}
                 selecting={batch.selection.selecting}
                 checked={batch.selection.selected.has(item.id)}
                 onToggle={() => batch.selection.toggle(item.id)}
@@ -4485,10 +4506,10 @@ function AppearanceFields() {
 
   return (
     <section>
-      <h2 className={styles.sectionTitle}>外观</h2>
+      <p className={styles.meta}>选一种看着舒服的外观。设置自动保存在当前浏览器。</p>
       <fieldset className={styles.field}>
         <legend>亮度</legend>
-        <div className={styles.choiceRow}>
+        <div className={styles.appearanceChoices}>
           <label className={styles.filterChoice}>
             <input type="radio" name="theme" checked={theme === "dark"} onChange={() => pickTheme("dark")} />
             深色
@@ -4501,17 +4522,20 @@ function AppearanceFields() {
       </fieldset>
       <fieldset className={styles.field}>
         <legend>强调色</legend>
-        <div className={styles.choiceRow}>
+        <div className={styles.appearanceChoices}>
           <label className={styles.filterChoice}>
             <input type="radio" name="accent" checked={accent === "moss"} onChange={() => pickAccent("moss")} />
+            <span className={styles.colorSwatch} style={{background:'#27654c'}} aria-hidden="true"/>
             苔绿
           </label>
           <label className={styles.filterChoice}>
             <input type="radio" name="accent" checked={accent === "clay"} onChange={() => pickAccent("clay")} />
+            <span className={styles.colorSwatch} style={{background:'#8f4d36'}} aria-hidden="true"/>
             陶土
           </label>
           <label className={styles.filterChoice}>
             <input type="radio" name="accent" checked={accent === "ink"} onChange={() => pickAccent("ink")} />
+            <span className={styles.colorSwatch} style={{background:'#3d5a73'}} aria-hidden="true"/>
             墨蓝
           </label>
         </div>
@@ -4520,143 +4544,95 @@ function AppearanceFields() {
   );
 }
 
-function IconLibrarySection() {
+function IconLibrarySection({ visible }: {visible: boolean}) {
   const query = useIconLibrary();
   const queryClient = useQueryClient();
+  const locations = useQuery({ queryKey: ["locations", "icon-usage"], queryFn: () => fetchAllLocations(new URLSearchParams({ flat: "1" })) });
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<number | null>(null);
   const [names, setNames] = useState<Record<number, string>>({});
-  const [formError, setFormError] = useState<ApiError | null>(null);
+  const [draft, setDraft] = useState<{ name: string; svg: string } | null>(null);
   const [uploadError, setUploadError] = useState("");
+  const [formError, setFormError] = useState<ApiError | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!query.data) return;
-    setNames((current) => {
-      const next = { ...current };
-      for (const icon of query.data) {
-        if (next[icon.id] === undefined) next[icon.id] = icon.name;
-      }
-      return next;
-    });
-  }, [query.data]);
-
+  const [notice, setNotice] = useState('');
   const upload = useMutation({
     mutationFn: (input: { name: string; svg: string }) => createLocationIcon(input.name, input.svg),
-    onSuccess: () => {
-      setUploadError("");
-      setFormError(null);
-      void queryClient.invalidateQueries({ queryKey: ["location-icons"] });
-    },
-    onError: (error) => {
-      const api = asApiError(error, "无法上传图标");
-      setUploadError(fieldText(api, "svg") || fieldText(api, "name") || api.message);
-    },
+    onSuccess: created => { setDraft(null); setUploadError(""); setNotice(`已上传「${created.name}」`); void queryClient.invalidateQueries({ queryKey: ["location-icons"] }); },
+    onError: error => { const api = asApiError(error, "无法上传图标"); setUploadError(fieldText(api, "svg") || fieldText(api, "name") || api.message); },
   });
   const saveName = useMutation({
-    mutationFn: (icon: LocationIconRecord) =>
-      updateLocationIcon(icon.id, { version: icon.version, name: names[icon.id] ?? icon.name }),
-    onSuccess: (updated) => {
-      setFormError(null);
-      setNames((current) => ({ ...current, [updated.id]: updated.name }));
-      void queryClient.invalidateQueries({ queryKey: ["location-icons"] });
-    },
-    onError: (error) => setFormError(asApiError(error, "无法保存图标")),
+    mutationFn: (icon: LocationIconRecord) => updateLocationIcon(icon.id, { version: icon.version, name: names[icon.id] ?? icon.name }),
+    onSuccess: updated => { setFormError(null); setNames(current => ({ ...current, [updated.id]: updated.name })); setSelected(null); setNotice('图标名称已保存'); void queryClient.invalidateQueries({ queryKey: ["location-icons"] }); },
+    onError: error => setFormError(asApiError(error, "无法保存图标")),
   });
   const remove = useMutation({
     mutationFn: (icon: LocationIconRecord) => deleteLocationIcon(icon.id, icon.version),
-    onSuccess: () => {
-      setFormError(null);
-      setDeleting(null);
-      void queryClient.invalidateQueries({ queryKey: ["location-icons"] });
-    },
-    onError: (error) => {
-      if (isIconInUse(error)) {
-        setFormError(asApiError(error, "有位置正在使用"));
-        setDeleting(null);
-        return;
-      }
-      setFormError(asApiError(error, "无法删除图标"));
-    },
+    onSuccess: () => { setFormError(null); setDeleting(null); setSelected(null); setNotice('图标已删除'); void queryClient.invalidateQueries({ queryKey: ["location-icons"] }); },
+    onError: error => { setFormError(asApiError(error, isIconInUse(error) ? "有位置正在使用" : "无法删除图标")); },
   });
   useOnUnauth(query.error);
+  useOnUnauth(locations.error);
   useOnUnauth(upload.error);
   useOnUnauth(saveName.error);
   useOnUnauth(remove.error);
-
   async function onFile(file: File | undefined) {
     if (!file) return;
-    const svg = await file.text();
-    const base = file.name.replace(/\.svg$/i, "").trim() || "图标";
-    upload.mutate({ name: base, svg });
+    setUploadError("");
+    try { setDraft({ name: file.name.replace(/\.svg$/i, "").trim() || "图标", svg: await file.text() }); }
+    catch { setUploadError("无法读取文件，请重新选择"); }
   }
-
   const icons = query.data ?? [];
-
-  return (
-    <section>
-      <h2 className={styles.sectionTitle}>图标</h2>
-      {query.isLoading ? <Loading /> : null}
-      {query.isError ? (
-        <LoadError error={query.error} onRetry={() => void query.refetch()} pending={query.isFetching} />
-      ) : null}
-      {query.isSuccess && icons.length === 0 ? <p>还没有自己的图标</p> : null}
-      {icons.length > 0 ? (
-        <ul className={styles.iconLibraryList}>
-          {icons.map((icon) => (
-            <li key={icon.id} className={styles.iconLibraryRow}>
-              <CustomSVG svg={icon.svg} className={styles.rowIcon} />
-              <input
-                name={`icon-name-${icon.id}`}
-                value={names[icon.id] ?? icon.name}
-                onChange={(event) => setNames((current) => ({ ...current, [icon.id]: event.target.value }))}
-              />
-              <div className={styles.iconLibraryActions}>
-                <button
-                  className={styles.button}
-                  type="button"
-                  disabled={saveName.isPending}
-                  onClick={() => saveName.mutate(icon)}
-                >
-                  保存
-                </button>
-                <DeleteConfirm
-                  confirming={deleting === icon.id}
-                  pending={remove.isPending}
-                  error={deleting === icon.id ? formError : null}
-                  onAsk={() => {
-                    setDeleting(icon.id);
-                    setFormError(null);
-                  }}
-                  onCancel={() => {
-                    setDeleting(null);
-                    setFormError(null);
-                  }}
-                  onConfirm={() => remove.mutate(icon)}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <label className={styles.iconUpload}>
-        上传 SVG
-        <input
-          type="file"
-          accept="image/svg+xml,.svg"
-          disabled={upload.isPending}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            void onFile(file);
-          }}
-        />
-      </label>
-      {uploadError ? <p className={styles.error}>{uploadError}</p> : null}
-      {deleting == null && formError ? <FormIssues error={formError} /> : null}
-    </section>
-  );
+  const active = icons.find(icon => icon.id === selected);
+  const used = active ? (locations.data ?? []).filter(location => location.custom_icon_id === active.id) : [];
+  const shown = icons.filter(icon => icon.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+  return <section>
+    {notice ? <p className={styles.inlineNotice} role="status">{notice}</p> : null}
+    <div className={styles.actions}>
+      <label className={styles.field}>搜索图标<input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="输入图标名称" /></label>
+      <label className={styles.iconUpload}>上传 SVG<input type="file" accept="image/svg+xml,.svg" disabled={upload.isPending} onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; void onFile(file); }} /></label>
+    </div>
+    {query.isLoading ? <Loading /> : null}
+    {query.isError ? <LoadError error={query.error} onRetry={() => void query.refetch()} pending={query.isFetching} /> : null}
+    {query.isSuccess && !icons.length ? <p>还没有自己的图标，上传 SVG 后可用于位置。</p> : null}
+    {icons.length > 0 && !shown.length ? <p>没有匹配的图标</p> : null}
+    <ul className={styles.iconLibraryGrid}>{shown.map(icon => <li key={icon.id}>
+      <button className={styles.iconLibraryCard} type="button" onClick={() => { setSelected(icon.id); setFormError(null); void locations.refetch(); }}>
+        <CustomSVG svg={icon.svg} className={styles.iconLibraryPreview} /><span>{icon.name}</span><small>查看与修改</small>
+      </button>
+    </li>)}</ul>
+    {active && visible ? <Dialog title={active.name} onClose={() => setSelected(null)} busy={saveName.isPending || remove.isPending}>
+      <div className={styles.iconDetailPanel}>
+        <CustomSVG svg={active.svg} className={styles.iconLibraryPreview} />
+        <form onSubmit={event => { event.preventDefault(); setFormError(null); saveName.mutate(active); }}>
+          <label className={styles.field}>图标名称<input required disabled={saveName.isPending || remove.isPending} value={names[active.id] ?? active.name} onChange={event => setNames(current => ({ ...current, [active.id]: event.target.value }))} /></label>
+          <button className={styles.buttonPrimary} disabled={saveName.isPending || remove.isPending}>保存名称</button>
+        </form>
+        <h3>使用位置</h3>
+        {locations.isLoading ? <Loading /> : null}
+        {locations.isError ? <LoadError error={locations.error} onRetry={() => void locations.refetch()} pending={locations.isFetching} /> : null}
+        {used.length ? <><ul>{used.map(location => <li key={location.id}><Link to={`/locations/${location.id}`}>{location.path.map(node => node.name).join(" / ") || location.name}</Link></li>)}</ul><p>正在使用的图标不能删除，请先为这些位置更换图标。</p></> : locations.isSuccess ? <p>目前没有位置使用此图标。</p> : null}
+        {locations.isSuccess && !locations.isFetching && !used.length ? <DeleteConfirm confirming={deleting === active.id} pending={remove.isPending} error={deleting === active.id ? formError : null} onAsk={() => { setDeleting(active.id); setFormError(null); }} onCancel={() => { setDeleting(null); setFormError(null); }} onConfirm={() => remove.mutate(active)} /> : null}
+        {deleting == null ? <FormIssues error={formError} /> : null}
+        <button data-dialog-cancel className={styles.button} type="button" disabled={saveName.isPending || remove.isPending} onClick={() => setSelected(null)}>关闭</button>
+      </div>
+    </Dialog> : null}
+    {draft && visible ? <Dialog title="预览上传图标" onClose={() => setDraft(null)} busy={upload.isPending}>
+      <form onSubmit={event => { event.preventDefault(); setUploadError(""); upload.mutate(draft); }}>
+        <img className={styles.uploadPreview} src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(draft.svg)}`} alt="待上传图标预览" />
+        <label className={styles.field}>图标名称<input required disabled={upload.isPending} value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></label>
+        <p>确认后上传，系统会检查 SVG 内容。</p>
+        {uploadError ? <p className={styles.error} role="alert">{uploadError}</p> : null}
+        <div className={styles.actions}><button data-dialog-cancel className={styles.button} type="button" disabled={upload.isPending} onClick={() => setDraft(null)}>取消</button><button className={styles.buttonPrimary} disabled={upload.isPending}>确认上传</button></div>
+      </form>
+    </Dialog> : uploadError ? <p className={styles.error}>{uploadError}</p> : null}
+  </section>;
 }
 
 export function AccountPage() {
+  const { pathname } = useLocation();
+  const section = pathname.split("/")[2] ?? "";
+  const titles: Record<string, string> = { appearance: "外观", icons: "图标库", security: "账号安全", integrations: "助手接入" };
   const me = useQuery({ queryKey: ["me"], queryFn: fetchMe, retry: false });
   const tokens = useQuery({ queryKey: ["tokens"], queryFn: listTokens, retry: false });
   const queryClient = useQueryClient();
@@ -4767,11 +4743,20 @@ export function AccountPage() {
     createTok.mutate({ name: tokenName, scopes });
   }
 
+  if (section && !titles[section]) return <Navigate to="/account" replace />;
+
   return (
     <>
-      <h1 className={styles.title}>账号</h1>
-      <AppearanceFields />
-      <IconLibrarySection />
+      {section ? <Link className={styles.back} to="/account">← 返回设置</Link> : null}
+      <h1 className={styles.title} tabIndex={-1}>{titles[section] ?? "设置"}</h1>
+      {!section ? <div className={styles.settingsGrid}>{[
+        ["appearance", "外观", "调整亮度与强调色"], ["icons", "图标库", "上传与管理位置图标"],
+        ["security", "账号安全", "用户名、密码与退出登录"], ["integrations", "助手接入", "创建与管理接入令牌"],
+        ["trash", "回收站", "查看已删除物品与恢复"],
+      ].map(([key, title, description]) => <Link className={styles.settingsCard} key={key} to={key === "trash" ? "/trash" : `/account/${key}`}><h2>{title}</h2><p>{description}</p><span aria-hidden="true">›</span></Link>)}</div> : null}
+      <div className={styles.settingsSection} hidden={section !== "appearance"}><AppearanceFields /></div>
+      <div className={styles.settingsSection} hidden={section !== "icons"}><IconLibrarySection visible={section === 'icons'}/></div>
+      <div className={styles.settingsSection} hidden={section !== "security"}>
       <h2 className={styles.sectionTitle}>用户名</h2>
       <form onSubmit={onUsernameSubmit}>
         <label className={styles.field}>
@@ -4791,7 +4776,7 @@ export function AccountPage() {
           保存用户名
         </button>
       </form>
-      {usernameNotice ? <p>{usernameNotice}</p> : null}
+      {usernameNotice ? <p className={styles.inlineNotice} role="status">{usernameNotice}</p> : null}
       <h2 className={styles.sectionTitle}>密码</h2>
       <form onSubmit={onPasswordSubmit}>
         <label className={styles.field}>
@@ -4836,7 +4821,9 @@ export function AccountPage() {
           修改密码
         </button>
       </form>
-      {passwordNotice ? <p>{passwordNotice}</p> : null}
+      {passwordNotice ? <p className={styles.inlineNotice} role="status">{passwordNotice}</p> : null}
+      </div>
+      <div className={styles.settingsSection} hidden={section !== "integrations"}>
       <div className={styles.tokenBlock}>
         <h2 className={styles.sectionTitle}>接入令牌</h2>
         {tokens.isLoading ? <Loading /> : null}
@@ -4905,13 +4892,13 @@ export function AccountPage() {
           </div>
         ) : null}
       </div>
-      <p>
-        <Link to="/trash">回收站</Link>
-      </p>
+      </div>
+      <div hidden={section !== "security"}>
       {signOut.isError ? <p className={styles.error}>{messageOf(signOut.error, "退出失败")}</p> : null}
       <button className={styles.button} type="button" onClick={() => signOut.mutate()} disabled={signOut.isPending}>
-        退出
+        退出登录
       </button>
+      </div>
     </>
   );
 }

@@ -11,6 +11,12 @@ export function searchLocations<T extends LocationSearchItem>(query: string, row
   return filterLocations(query, rows).sort((a, b) => Number(b.code?.toLowerCase() === q) - Number(a.code?.toLowerCase() === q));
 }
 
+export function locationDirectoryRows<T extends LocationSearchItem & { id: number; parent_id: number | null; type: string }>(nodes: T[], expanded: Set<number>, query: string, type: string) {
+  if (type === 'all' && !query.trim()) return treeRows(nodes, expanded);
+  const matches = searchLocations(query, nodes).filter(node => type === 'all' || node.type === type);
+  return matches.map(node => ({ node, depth: 0, hasChildren: false }));
+}
+
 export function treeRows<T extends { id: number; parent_id: number | null }>(nodes: T[], expanded: Set<number>): { node: T; depth: number; hasChildren: boolean }[] {
   const children = new Map<number | null, T[]>();
   for (const node of nodes) {

@@ -17,7 +17,7 @@ export function NavIcon({ name }: { name: 'items' | 'locations' | 'categories' |
 }
 
 export function PageHeading({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
-  return <div className={styles.pageHeading}><div><h1 className={styles.title}>{title}</h1>{description ? <p className={styles.intro}>{description}</p> : null}</div>{action}</div>;
+  return <div className={styles.pageHeading}><div><h1 className={styles.title} tabIndex={-1}>{title}</h1>{description ? <p className={styles.intro}>{description}</p> : null}</div>{action}</div>;
 }
 
 export function QueryError({ error, retry, pending }: { error: unknown; retry: () => void; pending?: boolean }) {

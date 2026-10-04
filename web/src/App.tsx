@@ -39,7 +39,7 @@ export function App() {
         <Route path="/categories" element={<CategoryDirectoryPage />} />
         <Route path="/categories/:id" element={<CategoryPage />} />
         <Route path="/returns" element={<ReturnListPage />} />
-        <Route path="/account" element={<AccountPage />} />
+        <Route path="/account/*" element={<AccountPage />} />
         <Route path="/trash" element={<TrashListPage />} />
         <Route path="/trash/:id" element={<TrashItemPage />} />
       </Route>

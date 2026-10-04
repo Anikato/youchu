@@ -1,12 +1,24 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { returnStatus, searchLocations, treeRows } from '../src/uiModel.ts';
+import { returnStatus, searchLocations, treeRows, locationDirectoryRows } from '../src/uiModel.ts';
 
 test('归位状态区分整件、部分配件和已完成事项', () => {
   assert.equal(returnStatus([]), null);
   assert.equal(returnStatus([{completed_at:'2026-10-04',part_note:null}]), null);
   assert.equal(returnStatus([{completed_at:null,part_note:'充电器'}]), '部分待归位');
   assert.equal(returnStatus([{completed_at:null,part_note:null}]), '待归位');
+});
+
+test('类型筛选平铺嵌套容器，和路径搜索组合，不把父级算作匹配', () => {
+  const nodes = [
+    {id:1,parent_id:null,type:'area',name:'厨房',code:null,path:[{name:'厨房',code:null}]},
+    {id:2,parent_id:1,type:'fixed',name:'柜格',code:'K101',path:[{name:'厨房',code:null}]},
+    {id:3,parent_id:2,type:'movable',name:'工具盒',code:'B101',path:[{name:'厨房',code:null},{name:'工具盒',code:'B101'}]},
+  ];
+  assert.deepEqual(locationDirectoryRows(nodes,new Set(),'','movable').map(r=>[r.node.id,r.depth,r.hasChildren]),[[3,0,false]]);
+  assert.deepEqual(locationDirectoryRows(nodes,new Set(),'厨房','movable').map(r=>r.node.id),[3]);
+  assert.equal(locationDirectoryRows(nodes,new Set(),'不存在','movable').length,0);
+  assert.deepEqual(locationDirectoryRows(nodes,new Set(),'','all').map(r=>r.node.id),[1]);
 });
 
 test('位置按路径搜索，精确编号优先', () => {

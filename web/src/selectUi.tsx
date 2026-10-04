@@ -16,6 +16,8 @@ import { batchSummary, locationCreateFrom, runSequential } from "./batch";
 import { filterLocations } from "./locationSearch";
 import { pageAllSelected, selectPageIds, toggleSelected } from "./select";
 import styles from "./styles.module.css";
+import { Dialog } from './dialog';
+import { QueryError } from './catalogUi';
 
 export function useListSelection(pageKey: string) {
   const [selecting, setSelecting] = useState(false);
@@ -70,7 +72,7 @@ export function SelectToggle({
 }) {
   return (
     <div className={styles.actions}>
-      <button className={styles.button} type="button" onClick={onToggle}>
+      <button className={styles.button} data-dialog-fallback type="button" onClick={onToggle}>
         {selecting ? "完成" : "选择"}
       </button>
       {selecting ? (
@@ -110,14 +112,14 @@ export function RowCheck({
   );
 }
 
-export function UndoBanner({ message, onUndo, onDismiss }: { message: string; onUndo: () => void; onDismiss: () => void }) {
+export function UndoBanner({ message, onUndo, onDismiss }: { message: string; onUndo?: () => void; onDismiss: () => void }) {
   return (
-    <div className={styles.undoBanner}>
+    <div className={styles.undoBanner} role="status" aria-live="polite">
       <p>{message}</p>
       <div className={styles.actions}>
-        <button className={styles.button} type="button" onClick={onUndo}>
+        {onUndo ? <button className={styles.button} type="button" onClick={onUndo}>
           撤销
-        </button>
+        </button> : null}
         <button className={styles.button} type="button" onClick={onDismiss}>
           关闭
         </button>
@@ -152,17 +154,17 @@ export function BatchBar({
       <div className={styles.batchBar}>
         {error ? <p className={styles.error}>{error}</p> : null}
         {confirming ? (
-          <div className={styles.confirm}>
+          <Dialog title="确认批量操作" onClose={onCancel} busy={pending} returnFocusLabel={confirming === 'move' ? '更换存放位置' : undefined}>
             <p>{confirmText ?? confirming}</p>
             <div className={styles.actions}>
-              <button className={styles.buttonDanger} type="button" onClick={onConfirm} disabled={pending}>
-                确认
+              <button className={confirming === 'trash' || /删除|回收站/.test(confirmText ?? confirming ?? '') ? styles.buttonDanger : styles.buttonPrimary} type="button" onClick={onConfirm} disabled={pending}>
+                {pending ? '正在处理…' : '确认操作'}
               </button>
-              <button className={styles.button} type="button" onClick={onCancel} disabled={pending}>
+              <button className={styles.button} data-dialog-cancel type="button" onClick={onCancel} disabled={pending}>
                 取消
               </button>
             </div>
-          </div>
+          </Dialog>
         ) : (
           <>
             <p>已选 {count}</p>
@@ -183,9 +185,9 @@ export function LocationPickPanel({ onPick, onCancel }: { onPick: (loc: Location
   const [query, setQuery] = useState("");
   const matches = filterLocations(query, options.data ?? []);
   return (
-    <div className={styles.locationPick}>
+    <Dialog title="更换存放位置" onClose={onCancel} returnFocusLabel="更换存放位置">
       <label className={styles.field}>
-        搬到
+        选择新的位置
         <input
           type="search"
           name="move_location_q"
@@ -196,7 +198,7 @@ export function LocationPickPanel({ onPick, onCancel }: { onPick: (loc: Location
         />
       </label>
       {options.isLoading ? <p>正在读取位置</p> : null}
-      {options.isError ? <p className={styles.error}>无法读取位置</p> : null}
+      {options.isError ? <QueryError error={options.error} retry={()=>void options.refetch()} pending={options.isFetching}/> : null}
       {options.data ? (
         <ul className={styles.locationChoices}>
           {matches.length === 0 ? <li>没有符合的位置</li> : null}
@@ -209,10 +211,10 @@ export function LocationPickPanel({ onPick, onCancel }: { onPick: (loc: Location
           ))}
         </ul>
       ) : null}
-      <button className={styles.button} type="button" onClick={onCancel}>
+      <button className={styles.button} data-dialog-cancel type="button" onClick={onCancel}>
         取消
       </button>
-    </div>
+    </Dialog>
   );
 }
 
@@ -292,7 +294,7 @@ export function useItemListBatch(pageKey: string) {
     undo.clear();
     setUndoItems([]);
     setError(result.failed.length === 0 ? "" : batchSummary(result.done.length, result.failed));
-    if (result.failed.length === 0) setError("");
+    if (result.failed.length === 0) undo.show(`已更换 ${result.done.length} 件物品的存放位置`);
     await refresh();
   }
 
@@ -326,6 +328,7 @@ export function useItemListBatch(pageKey: string) {
     trash,
     move,
     undoTrash,
+    canUndo: undoItems.length > 0,
   };
 }
 
@@ -394,6 +397,11 @@ export function useTrashListBatch(pageKey: string) {
     if (result.failed.length > 0) setError(batchSummary(result.done.length, result.failed));
     await queryClient.invalidateQueries({ queryKey: ["trash"] });
     await queryClient.invalidateQueries({ queryKey: ["items"] });
+    await queryClient.invalidateQueries({ queryKey: ["item"] });
+    await queryClient.invalidateQueries({ queryKey: ["locations"] });
+    await queryClient.invalidateQueries({ queryKey: ["location"] });
+    await queryClient.invalidateQueries({ queryKey: ["categories"] });
+    await queryClient.invalidateQueries({ queryKey: ["category"] });
   }
 
   return { selection, pending, error, confirm, setConfirm, restore };
@@ -419,6 +427,8 @@ export function useReturnListBatch(pageKey: string) {
     selection.retainFailed(result.failed.map(({row})=>row.id));
     if (result.failed.length > 0) setError(batchSummary(result.done.length, result.failed));
     await queryClient.invalidateQueries({ queryKey: ["return-tasks"] });
+    await queryClient.invalidateQueries({ queryKey: ["items"] });
+    await queryClient.invalidateQueries({ queryKey: ["item"] });
   }
 
   return { selection, pending, error, confirm, setConfirm, complete };

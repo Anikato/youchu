@@ -5,7 +5,7 @@ const themeKey = "youchu-theme";
 const accentKey = "youchu-accent";
 const paperByTheme: Record<Theme, string> = {
   dark: "#161a18",
-  light: "#f3f6f4",
+  light: "#f6f7f4",
 };
 
 function applyThemeColor(theme: Theme): void {
@@ -15,7 +15,7 @@ function applyThemeColor(theme: Theme): void {
 
 export function readTheme(): Theme {
   const value = localStorage.getItem(themeKey);
-  return value === "light" || value === "dark" ? value : "dark";
+  return value === "light" || value === "dark" ? value : "light";
 }
 
 export function readAccent(): Accent {

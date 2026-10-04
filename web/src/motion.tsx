@@ -53,10 +53,9 @@ export function EnterBox({ className, children }: { className?: string; children
 }
 
 export function PageEnter({ pathname, className, children }: { pathname: string; className?: string; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEnter(ref, [pathname]);
+  // Fixed action bars and dialogs must keep the viewport as their containing block.
   return (
-    <div ref={ref} className={className}>
+    <div className={className} data-page={pathname}>
       {children}
     </div>
   );

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useRef, useState, type CSSProperties, type Ref } from "react";
-import { Link, Navigate, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, Navigate, Outlet, ScrollRestoration, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ApiError,
   type AccessTokenScope,
@@ -88,11 +88,13 @@ import { PageEnter, StaggerList } from "./motion";
 import { PendingPhotos } from "./pendingPhotos";
 import { PhotoAddButtons } from "./photos";
 import { readLastCategoryIds, readLastLocationId, rememberItemPlacement } from "./prefs";
-import { filterLocations } from "./locationSearch";
-import { formatAddedAt } from "./relativeTime";
 import { StickySave, saveButtonLabel } from "./stickySave";
 import styles from "./styles.module.css";
 import { type Accent, type Theme, readAccent, readTheme, setAccent, setTheme } from "./theme";
+import { ItemSummary, NavIcon, PageHeading } from './catalogUi';
+import { searchLocations } from './uiModel';
+import { pendingUpload, uploadBatch } from './uploadBatch';
+import { formatAddedAt } from './relativeTime';
 
 const typeLabel: Record<LocationType, string> = {
   area: "区域",
@@ -452,6 +454,7 @@ function useOnUnauth(error: unknown) {
 export function RequireAuth() {
   const me = useQuery({ queryKey: ["me"], queryFn: fetchMe, retry: false });
   if (me.isLoading) return <p className={styles.page}>正在确认登录状态</p>;
+  if (me.isError) return <div className={styles.page}><LoadError error={me.error} onRetry={() => void me.refetch()} pending={me.isFetching}/></div>;
   if (!me.data) return <Navigate to="/login" replace />;
   return <AppShell username={me.data.username} />;
 }
@@ -474,26 +477,27 @@ function AppShell({ username }: { username: string }) {
         </Link>
         <nav className={styles.nav} aria-label="主要">
           <Link to="/" aria-current={itemHere ? "page" : undefined}>
-            物品
+            <NavIcon name="items"/><span>找东西</span>
           </Link>
           <Link to="/locations" aria-current={locHere ? "page" : undefined}>
-            位置
+            <NavIcon name="locations"/><span>位置</span>
           </Link>
           <Link to="/categories" aria-current={catHere ? "page" : undefined}>
-            分类
+            <NavIcon name="categories"/><span>分类</span>
           </Link>
           <Link to="/returns" aria-current={retHere ? "page" : undefined}>
-            待归位
+            <NavIcon name="returns"/><span>待归位</span>
           </Link>
         </nav>
         <Link className={styles.user} to="/account" aria-current={pathname === "/account" ? "page" : undefined}>
-          {username}
+          <NavIcon name="account"/><span>{username}</span>
         </Link>
       </header>
       {notice ? <p>{notice}</p> : null}
       <PageEnter pathname={pathname} className={styles.pageEnter}>
         <Outlet />
       </PageEnter>
+      <ScrollRestoration getKey={loc=>loc.pathname+loc.search}/>
     </main>
   );
 }
@@ -948,10 +952,12 @@ function ItemLocationsField({
   useOnUnauth(options.error);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [activeIndex,setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
   const chosen = new Set(links.map((link) => link.location_id));
   const available = (options.data ?? []).filter((loc) => !chosen.has(loc.id));
-  const matches = filterLocations(query, available);
+  const matches = searchLocations(query, available);
+  useEffect(()=>{if(activeIndex>=0) rootRef.current?.querySelector(`#location-choice-${matches[activeIndex]?.id}`)?.scrollIntoView({block:'nearest'});},[activeIndex,matches]);
 
   useEffect(() => {
     if (!open) return;
@@ -974,6 +980,8 @@ function ItemLocationsField({
       },
     ]);
     setQuery("");
+    setOpen(false);
+    setActiveIndex(-1);
   }
 
   return (
@@ -982,6 +990,7 @@ function ItemLocationsField({
       {links.map((link) => (
         <div key={link.location_id}>
           {link.path.length > 0 ? <LocationPathLine path={link.path} /> : <span className={styles.path}>{String(link.location_id)}</span>}
+          <details className={styles.filters} open={Boolean(link.note) || undefined}><summary>分放备注（可选）</summary>
           <label className={styles.field}>
             放置说明
             <textarea
@@ -994,6 +1003,7 @@ function ItemLocationsField({
               }}
             />
           </label>
+          </details>
           <button
             className={styles.button}
             type="button"
@@ -1014,16 +1024,21 @@ function ItemLocationsField({
             name="location_q"
             value={query}
             placeholder="找位置"
+            aria-label="找存放位置"
+            role="combobox"
             autoComplete="off"
             aria-autocomplete="list"
             aria-expanded={open}
             aria-controls="location-choices"
+            aria-activedescendant={open && activeIndex>=0 && matches[activeIndex] ? `location-choice-${matches[activeIndex].id}` : undefined}
             onChange={(event) => {
               setQuery(event.target.value);
+              setActiveIndex(-1);
               setOpen(true);
             }}
             onFocus={() => setOpen(true)}
             onKeyDown={(event) => {
+              if(event.key==='ArrowDown' || event.key==='ArrowUp') {event.preventDefault();setOpen(true);setActiveIndex(current=>Math.max(0,Math.min(matches.length-1,current+(event.key==='ArrowDown' ? 1 : -1))));return;}
               if (event.key === "Escape") {
                 event.preventDefault();
                 setOpen(false);
@@ -1031,7 +1046,8 @@ function ItemLocationsField({
               }
               if (event.key === "Enter") {
                 event.preventDefault();
-                if (matches[0]) add(matches[0]);
+                if (open && activeIndex>=0 && matches[activeIndex]) add(matches[activeIndex]);
+                else if (open && query.trim() && matches.length===1) add(matches[0]);
               }
             }}
           />
@@ -1040,8 +1056,8 @@ function ItemLocationsField({
               {matches.length === 0 ? (
                 <li className={styles.locationChoicesEmpty}>没有符合的位置</li>
               ) : (
-                matches.map((loc) => (
-                  <li key={loc.id} role="option">
+                matches.map((loc,index) => (
+                  <li key={loc.id} role="option" id={`location-choice-${loc.id}`} aria-selected={index===activeIndex}>
                     <button
                       className={styles.button}
                       type="button"
@@ -1079,10 +1095,11 @@ function ItemCategoriesField({
   });
   useOnUnauth(options.error);
   const [picked, setPicked] = useState("");
+  const [categorySearch,setCategorySearch] = useState('');
   const [newName, setNewName] = useState("");
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const chosen = new Set(links.map((link) => link.category_id));
-  const available = (options.data ?? []).filter((cat) => !chosen.has(cat.id));
+  const available = (options.data ?? []).filter((cat) => !chosen.has(cat.id) && formatCategoryPath(cat.path).toLowerCase().includes(categorySearch.trim().toLowerCase()));
   const create = useMutation({
     mutationFn: (name: string) => createCategory({ name }),
     onSuccess: (cat) => {
@@ -1133,7 +1150,8 @@ function ItemCategoriesField({
       ) : null}
       {options.data ? (
         <div className={styles.stack}>
-          <select name="category_id" value={picked} onChange={(event) => setPicked(event.target.value)}>
+          <input type="search" aria-label="找分类" placeholder="搜索分类名称" value={categorySearch} onChange={event=>{setCategorySearch(event.target.value);setPicked('');}}/>
+          <select aria-label="选择分类" name="category_id" value={picked} onChange={(event) => setPicked(event.target.value)}>
             <option value="">选择分类</option>
             {available.map((cat) => (
               <option key={cat.id} value={cat.id}>
@@ -1164,7 +1182,7 @@ function ItemCategoriesField({
           </button>
         </div>
       ) : null}
-      <span>新建分类</span>
+      <details className={styles.filters}><summary>没有合适的分类？新建</summary>
       <div className={styles.stack}>
         <input
           name="new_category"
@@ -1183,6 +1201,7 @@ function ItemCategoriesField({
       </div>
       {fieldText(createError, "name") ? <span className={styles.error}>{fieldText(createError, "name")}</span> : null}
       {createError && !fieldText(createError, "name") ? <span className={styles.error}>{createError.message}</span> : null}
+      </details>
       {error ? <span className={styles.error}>{error}</span> : null}
     </div>
   );
@@ -1277,11 +1296,13 @@ function ItemFields({
         inputRef={nameRef}
       />
       <ItemLocationsField links={draft.locations} onChange={(locations) => set("locations", locations)} error={fieldText(error, "locations")} />
+      <details className={styles.filters}><summary>分类{draft.categories.length ? ` · 已选 ${draft.categories.length} 个` : '（可选）'}</summary>
       <ItemCategoriesField
         links={draft.categories}
         onChange={(categories) => set("categories", categories)}
         error={fieldText(error, "categories")}
       />
+      </details>
       <details
         className={styles.filters}
         open={extrasShown}
@@ -1376,9 +1397,12 @@ export function ItemListPage() {
   const view = readItemList(listParams);
   const listQuery = listParams.toString();
   const [qInput, setQInput] = useState(state.q);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pickedCategory, setPickedCategory] = useState("");
   useEffect(() => {
+    if(searchTimer.current) clearTimeout(searchTimer.current);
     setQInput(state.q);
+    return ()=>{if(searchTimer.current) clearTimeout(searchTimer.current);};
   }, [state.q]);
   const query = useQuery({
     queryKey: ["items", "list", listQuery],
@@ -1423,8 +1447,8 @@ export function ItemListPage() {
     }
   }, [page, view.offset, view.limit, setParams]);
 
-  function applyFilters(patch: Partial<ItemListState>) {
-    setParams((current) => writeItemList({ ...readItemList(current), ...patch, offset: "" }));
+  function applyFilters(patch: Partial<ItemListState>, replace=false) {
+    setParams((current) => writeItemList({ ...readItemList(current), ...patch, offset: "" }),{replace});
   }
 
   function locationPath(id: string): string {
@@ -1441,22 +1465,15 @@ export function ItemListPage() {
 
   return (
     <>
-      <h1 className={styles.title}>家里的物品</h1>
-      <p className={styles.intro}>记下拥有的东西，找到它们的去处。</p>
+      <PageHeading title="家里的东西" description="知道有什么，也知道在哪里。" action={<Link className={styles.buttonPrimary} to="/items/new">＋ 记一件</Link>}/>
       {batch.undo.message ? (
         <UndoBanner message={batch.undo.message} onUndo={() => void batch.undoTrash()} onDismiss={() => batch.undo.clear()} />
       ) : null}
-      <SelectToggle
-        selecting={batch.selection.selecting}
-        onToggle={() => batch.selection.toggleMode()}
-        allSelected={batch.selection.pageAllSelected((page?.data ?? []).map((item) => item.id))}
-        onSelectAll={() => batch.selection.selectAll((page?.data ?? []).map((item) => item.id))}
-        selectAllDisabled={!page || page.data.length === 0}
-      />
       <form
         className={styles.searchRow}
         onSubmit={(event: FormEvent) => {
           event.preventDefault();
+          if(searchTimer.current) clearTimeout(searchTimer.current);
           applyFilters({ q: qInput });
         }}
       >
@@ -1466,25 +1483,21 @@ export function ItemListPage() {
           value={qInput}
           autoComplete="off"
           aria-label="找家里的东西"
-          placeholder="找家里的东西"
-          onChange={(event) => setQInput(event.target.value)}
+          placeholder="搜名称、型号，或找位置编号"
+          onChange={(event) => {const value=event.target.value;setQInput(value);if(searchTimer.current) clearTimeout(searchTimer.current);searchTimer.current=setTimeout(()=>applyFilters({q:value},true),300);}}
         />
         <button className={styles.buttonPrimary} type="submit">
           查找
         </button>
-        <Link className={styles.button} to="/items/new">
-          ＋ 新增物品
-        </Link>
       </form>
-      {view.unlocated ? (
-        <button className={styles.button} type="button" onClick={() => applyFilters({ unlocated: false })}>
-          全部物品
-        </button>
-      ) : (
-        <button className={styles.button} type="button" onClick={() => applyFilters({ unlocated: true })}>
-          只看待定位
-        </button>
-      )}
+      <div className={styles.toolbar}>
+        <div className={styles.chips}>
+          <button className={!view.unlocated && !view.uncategorized ? styles.chipActive : styles.chip} onClick={() => applyFilters({unlocated:false,uncategorized:false})}>全部</button>
+          <button className={view.unlocated ? styles.chipActive : styles.chip} onClick={() => applyFilters({unlocated:true,uncategorized:false})}>待定位</button>
+          <button className={view.uncategorized ? styles.chipActive : styles.chip} onClick={() => applyFilters({uncategorized:true,unlocated:false})}>未分类</button>
+        </div>
+        <details className={styles.filters}>
+          <summary>筛选与排序</summary>
       <label className={styles.field}>
         排序
         <select
@@ -1510,8 +1523,6 @@ export function ItemListPage() {
           ))}
         </select>
       </label>
-      <details className={styles.filters}>
-        <summary>筛选</summary>
         <label className={styles.field}>
           位置范围
           {locationsQuery.isLoading ? <Loading /> : null}
@@ -1664,9 +1675,9 @@ export function ItemListPage() {
           未分类
         </label>
       </details>
+      </div>
       {hasFilter ? (
         <div className={styles.filterSummary}>
-          {view.q.trim() !== "" ? <p>关键词：{view.q.trim()}</p> : null}
           {view.inLocation !== "" ? (
             <p>
               位置：<span className={styles.path}>{locationPath(view.inLocation)}</span>
@@ -1690,7 +1701,7 @@ export function ItemListPage() {
           {view.uncategorized ? <p>未分类</p> : null}
           {view.unlocated ? <p>待定位</p> : null}
           <button
-            className={styles.button}
+            className={styles.chip}
             type="button"
             onClick={() => {
               setQInput("");
@@ -1698,14 +1709,25 @@ export function ItemListPage() {
               setParams(writeItemList({ ...emptyItemList, limit: view.limit }));
             }}
           >
-            清空筛选
+            清除条件 ×
           </button>
         </div>
       ) : null}
+      {view.q.trim() && locationsQuery.data && searchLocations(view.q, locations).length > 0 ? (
+        <section className={styles.locationResults}>
+          <h2 className={styles.sectionTitle}>匹配的位置</h2>
+          {searchLocations(view.q, locations).slice(0, 5).map(loc => <Link key={loc.id} className={styles.locationCard} to={`/locations/${loc.id}`}><NavIcon name="locations"/><span><strong>{loc.name}</strong>{loc.code ? <span className={styles.codeBadge}>{loc.code}</span> : null}<span className={styles.path}>{formatPath(loc.path)}</span></span><span>›</span></Link>)}
+          {searchLocations(view.q, locations).length > 5 ? <Link className={styles.subtleLink} to={`/locations?q=${encodeURIComponent(view.q)}`}>查看全部匹配位置</Link> : null}
+        </section>
+      ) : null}
+      <div className={styles.resultsHeader}>
+        <p className={styles.resultCount}>{page ? `${page.total} 件物品` : '物品'}</p>
+        <SelectToggle selecting={batch.selection.selecting} onToggle={() => batch.selection.toggleMode()} allSelected={batch.selection.pageAllSelected((page?.data ?? []).map(item=>item.id))} onSelectAll={() => batch.selection.selectAll((page?.data ?? []).map(item=>item.id))} selectAllDisabled={!page?.data.length}/>
+      </div>
+      {batch.error ? <p className={styles.inlineNotice} role="alert">{batch.error}</p> : null}
       {query.isLoading ? <Loading /> : null}
       {query.isError ? <LoadError error={query.error} onRetry={() => void query.refetch()} pending={query.isFetching} /> : null}
       {page && page.total === 0 ? <p>{emptyCopy(view)}</p> : null}
-      {page && page.total > 0 ? <p className={styles.resultCount}>共 {page.total} 件物品</p> : null}
       {page && page.data.length > 0 ? (
         <StaggerList className={styles.list}>
           {page.data.map((item) => (
@@ -1717,29 +1739,11 @@ export function ItemListPage() {
               />
               {batch.selection.selecting ? (
                 <button className={styles.itemLink} type="button" onClick={() => batch.selection.toggle(item.id)}>
-                  <ItemThumb photoId={item.photos[0]?.id} />
-                  <span className={styles.itemLinkBody}>
-                    <span>{item.name}</span>
-                    {item.locations.length === 0 ? (
-                      <span className={styles.meta}>待定位</span>
-                    ) : (
-                      item.locations.map((link) => <LocationPathLine key={link.location_id} path={link.path} />)
-                    )}
-                    <span className={styles.meta}>{formatAddedAt(item.created_at)}</span>
-                  </span>
+                  <ItemSummary item={item}/>
                 </button>
               ) : (
-                <Link className={styles.itemLink} to={`/items/${item.id}`}>
-                  <ItemThumb photoId={item.photos[0]?.id} />
-                  <span className={styles.itemLinkBody}>
-                    <span>{item.name}</span>
-                    {item.locations.length === 0 ? (
-                      <span className={styles.meta}>待定位</span>
-                    ) : (
-                      item.locations.map((link) => <LocationPathLine key={link.location_id} path={link.path} />)
-                    )}
-                    <span className={styles.meta}>{formatAddedAt(item.created_at)}</span>
-                  </span>
+                <Link className={styles.itemLink} to={`/items/${item.id}`} state={{from:`/${listQuery ? `?${listQuery}` : ''}`}}>
+                  <ItemSummary item={item}/>
                 </Link>
               )}
             </li>
@@ -1836,6 +1840,7 @@ export function ItemCreatePage() {
 }
 
 function ItemCreateForm({ locationParam, categoryParam }: { locationParam: string; categoryParam: string }) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const hasLocationPreset = locationParam !== "";
   const hasCategoryPreset = categoryParam !== "";
@@ -1861,8 +1866,13 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
   const [uploading, setUploading] = useState(false);
   const [uploadIndex, setUploadIndex] = useState(0);
   const [uploadTotal, setUploadTotal] = useState(0);
-  const [authError, setAuthError] = useState<unknown>(null);
   const [saveNotice, setSaveNotice] = useState<{ id: number; name: string; photoFail: boolean } | null>(null);
+  const [failedUpload, setFailedUpload] = useState<{id:number;name:string;files:File[]} | null>(()=>pendingUpload.current);
+  useEffect(()=>{pendingUpload.current=failedUpload;},[failedUpload]);
+  const [retryingPhotos,setRetryingPhotos] = useState(false);
+  const [retryPhotoError,setRetryPhotoError] = useState('');
+  const [continueAdding,setContinueAdding] = useState(true);
+  const [savedItemId,setSavedItemId] = useState<number|null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const appliedLast = useRef(false);
@@ -1980,8 +1990,23 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
   useOnUnauth(locationsQuery.error);
   useOnUnauth(categoriesQuery.error);
   useOnUnauth(create.error);
-  useOnUnauth(authError);
-  const saving = create.isPending || uploading;
+  const saving = create.isPending || uploading || retryingPhotos;
+  useEffect(()=>{
+    if(savedItemId && !continueAdding && !saving && !failedUpload && draft.name === '') navigate(`/items/${savedItemId}`);
+  },[savedItemId,continueAdding,saving,failedUpload,draft.name,navigate]);
+
+  async function retryPhotos() {
+    if (!failedUpload || retryingPhotos) return;
+    setRetryingPhotos(true);
+    setRetryPhotoError('');
+    const failed = await uploadBatch(failedUpload.files, file=>uploadItemPhoto(String(failedUpload.id),file));
+    setFailedUpload(failed.length ? {...failedUpload,files:failed.map(row=>row.file)} : null);
+    if (failed.length) setRetryPhotoError(photoFailureText(failed[0].error,'照片仍未上传，请重试'));
+    else setSaveNotice({id:failedUpload.id,name:failedUpload.name,photoFail:false});
+    setRetryingPhotos(false);
+    void queryClient.invalidateQueries({queryKey:['items']});
+    void queryClient.invalidateQueries({queryKey:['item',String(failedUpload.id)]});
+  }
 
   async function retryPreset() {
     const result = await preset.refetch();
@@ -2025,7 +2050,7 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (saving) return;
+    if (saving || failedUpload) return;
     setFormError(null);
     setSaveNotice(null);
     const savedName = draft.name;
@@ -2039,31 +2064,24 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
     }
     rememberItemPlacement(savedLocations, savedCategories);
     const files = pendingPhotos.slice(0, 20);
-    let photoFail = false;
+    let failedFiles: File[] = [];
     if (files.length > 0) {
       setUploading(true);
       setUploadTotal(files.length);
-      for (let i = 0; i < files.length; i++) {
-        setUploadIndex(i + 1);
-        try {
-          await uploadItemPhoto(String(item.id), files[i]);
-        } catch (error) {
-          setAuthError(error);
-          if (isUnauthenticated(error)) {
-            setUploading(false);
-            setUploadTotal(0);
-            return;
-          }
-          photoFail = true;
-        }
-      }
+      const failed = await uploadBatch(files, (file,index)=>{setUploadIndex(index+1);return uploadItemPhoto(String(item.id),file);});
+      failedFiles = failed.map(row=>row.file);
+      if (failed.length) setRetryPhotoError(photoFailureText(failed[0].error,'照片未上传'));
       setUploading(false);
       setUploadTotal(0);
     }
     void queryClient.invalidateQueries({ queryKey: ["items"] });
+    void queryClient.invalidateQueries({queryKey:['locations']});
+    void queryClient.invalidateQueries({queryKey:['categories']});
     setPendingPhotos([]);
-    setDraft((current) => ({ ...current, name: "", alias: "", model: "", spec: "", quantityNote: "", note: "" }));
-    setSaveNotice({ id: item.id, name: savedName, photoFail });
+    setDraft((current) => ({ ...current, name: "", alias: "", model: "", spec: "", quantityNote: "", note: "", locations: current.locations.map(link => ({ ...link, note: null })) }));
+    setFailedUpload(failedFiles.length ? {id:item.id,name:savedName,files:failedFiles} : null);
+    setSaveNotice({ id: item.id, name: savedName, photoFail:failedFiles.length > 0 });
+    setSavedItemId(continueAdding ? null : item.id);
     setJustSaved(true);
     window.setTimeout(() => setJustSaved(false), 1500);
     nameRef.current?.focus();
@@ -2071,15 +2089,16 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
 
   if (!formReady) return <Loading />;
 
-  const saveLabel = saveButtonLabel(saving, uploadIndex, uploadTotal, justSaved);
+  const saveLabel = failedUpload ? '先处理未上传照片' : !saving && !justSaved && continueAdding ? '保存并继续' : saveButtonLabel(saving, uploadIndex, uploadTotal, justSaved);
   const barError = formError && !fieldText(formError, "name") && !fieldText(formError, "locations") && !fieldText(formError, "categories")
     ? formError.message
     : fieldText(formError, "name") || fieldText(formError, "locations") || fieldText(formError, "categories") || undefined;
 
   return (
     <>
-      <LeaveGuard dirty={draft.name.trim() !== "" || pendingPhotos.length > 0} />
-      <h1 className={styles.title}>新增物品</h1>
+      <LeaveGuard dirty={draft.name.trim() !== "" || pendingPhotos.length > 0 || Boolean(failedUpload)} />
+      <PageHeading title="记下家里的东西" description="只填名称就能保存，其他信息慢慢补。" action={<Link className={styles.button} to="/">返回目录</Link>}/>
+      {failedUpload ? <div className={styles.uploadNotice} role="alert"><p><Link to={`/items/${failedUpload.id}`}>{failedUpload.name}</Link>已保存，{failedUpload.files.length} 张照片未上传。</p>{retryPhotoError ? <p className={styles.error}>{retryPhotoError}</p> : null}<div className={styles.actions}><button className={styles.button} type="button" disabled={saving} onClick={()=>void retryPhotos()}>{retryingPhotos ? '正在重试…' : '重试未上传照片'}</button><button className={styles.chip} type="button" disabled={saving} onClick={()=>setFailedUpload(null)}>放弃这几张照片</button><button className={styles.chip} type="button" disabled={saving} onClick={()=>{pendingUpload.current=failedUpload;queryClient.setQueryData(['me'],null);navigate('/login');}}>重新登录</button></div><p className={styles.meta}>照片暂存在当前标签页；重新登录后打开「记一件」可继续上传。刷新或关闭页面前请先处理。</p></div> : null}
       {saveNotice ? (
         <p>
           已保存：
@@ -2108,7 +2127,8 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
           </button>
         </div>
       ) : null}
-      <form id="item-save-form" onSubmit={(event) => void onSubmit(event)}>
+      <form id="item-save-form" className={styles.editor} onSubmit={(event) => void onSubmit(event)}>
+        {draft.locations.length || draft.categories.length ? <div className={styles.resultsHeader}><p className={styles.meta}>已选位置/分类会沿用到下一件</p><button type="button" className={styles.chip} disabled={saving} onClick={()=>{setDraft(current=>({...current,locations:[],categories:[]}));rememberItemPlacement([],[]);}}>清空预设</button></div> : null}
         <ItemFields draft={draft} onChange={setDraft} error={formError} extrasOpen={false} nameRef={nameRef} />
         <FormIssues error={formError} />
         <PendingPhotos files={pendingPhotos} onRemove={(index) => setPendingPhotos((current) => current.filter((_, i) => i !== index))} />
@@ -2128,21 +2148,23 @@ function ItemCreateForm({ locationParam, categoryParam }: { locationParam: strin
             }
           />
         )}
-        <button className={`${styles.buttonPrimary} ${styles.formSave}`} type="submit" disabled={saving}>
+        <label className={styles.filterChoice}><input type="checkbox" checked={continueAdding} onChange={e=>setContinueAdding(e.target.checked)} disabled={saving}/>连续录入，保存后继续记下一件</label>
+        <button className={`${styles.buttonPrimary} ${styles.formSave}`} type="submit" disabled={saving || Boolean(failedUpload)}>
           {saveLabel}
         </button>
       </form>
       <div className={styles.stickySaveSpacer} />
-      <StickySave form="item-save-form" disabled={saving} label={saveLabel} error={barError} />
+      <StickySave form="item-save-form" disabled={saving || Boolean(failedUpload)} label={saveLabel} error={barError} />
     </>
   );
 }
 
 function ReturnTaskFields({ task, showItemName, showCreatedAt }: { task: ReturnTask; showItemName?: boolean; showCreatedAt?: boolean }) {
+  const current=useLocation();
   return (
     <>
       {showItemName ? (
-        <Link className={styles.itemLink} to={`/items/${task.item_id}`}>
+        <Link className={styles.itemLink} to={`/items/${task.item_id}`} state={{from:current.pathname+current.search}}>
           <ItemThumb photoId={task.cover_photo?.id} />
           <span className={styles.itemLinkBody}>{task.item_name}</span>
         </Link>
@@ -2150,7 +2172,7 @@ function ReturnTaskFields({ task, showItemName, showCreatedAt }: { task: ReturnT
       <p>{partLabel(task)}</p>
       {task.reason ? <p>原因：{task.reason}</p> : null}
       {task.destination_note ? <p>临时去向：{task.destination_note}</p> : null}
-      {showCreatedAt ? <p>建立时间：{task.created_at}</p> : null}
+      {showCreatedAt ? <p className={styles.meta}>登记于 {formatAddedAt(task.created_at)}</p> : null}
     </>
   );
 }
@@ -2261,6 +2283,8 @@ export function ItemEditPage() {
 
 function ItemEditForm({ id }: { id: string }) {
   const navigate = useNavigate();
+  const route=useLocation();
+  const from=(route.state as {from?:unknown}|null)?.from;
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ["item", id],
@@ -2321,6 +2345,9 @@ function ItemEditForm({ id }: { id: string }) {
       setFormError(null);
       setSaveNotice("已保存");
       setJustSaved(true);
+      void queryClient.invalidateQueries({queryKey:['items']});
+      void queryClient.invalidateQueries({queryKey:['locations']});
+      void queryClient.invalidateQueries({queryKey:['categories']});
       window.setTimeout(() => setJustSaved(false), 1500);
     },
     onError: (error) => {
@@ -2472,9 +2499,9 @@ function ItemEditForm({ id }: { id: string }) {
   return (
     <>
       <LeaveGuard dirty={JSON.stringify(draft) !== baseline} />
-      <h1 className={styles.title}>{draft.name}</h1>
+      <PageHeading title="编辑物品" description={draft.name} action={<Link className={styles.button} to={`/items/${id}`} state={{from}}>返回详情</Link>}/>
       {saveNotice ? <p>{saveNotice}</p> : null}
-      <form id="item-save-form" onSubmit={onSubmit}>
+      <form id="item-save-form" className={styles.editor} onSubmit={onSubmit}>
         <ItemFields draft={draft} onChange={setDraft} error={formError} extrasOpen={extrasOpen} nameRef={nameRef} />
         <FormIssues error={formError} />
         {conflict ? (
@@ -2487,7 +2514,7 @@ function ItemEditForm({ id }: { id: string }) {
       <div className={styles.stickySaveSpacer} />
       <StickySave form="item-save-form" disabled={save.isPending} label={saveLabel} error={barError} />
       <ItemPhotoSection itemId={id} photos={query.data?.photos ?? []} />
-      <section>
+      <section id="returns">
         <h2 className={styles.sectionTitle}>待归位事项</h2>
         {taskNotice ? <p>{taskNotice}</p> : null}
         {taskActionError ? <p className={styles.error}>{taskActionError}</p> : null}
@@ -2662,7 +2689,8 @@ export function ReturnListPage() {
 
   return (
     <>
-      <h1 className={styles.title}>待归位</h1>
+      <PageHeading title="待归位" description="临时取出的东西，记得放回它的去处。"/>
+      {batch.error ? <p role="alert" className={styles.inlineNotice}>{batch.error}</p> : null}
       {notice ? <p>{notice}</p> : null}
       {verifyError ? <p className={styles.error}>{verifyError}</p> : null}
       <SelectToggle
@@ -2878,6 +2906,7 @@ export function LocationListPage() {
       {query.isLoading ? <Loading /> : null}
       {query.isError ? <LoadError error={query.error} onRetry={() => void query.refetch()} pending={query.isFetching} /> : null}
       {page && page.total === 0 ? <p>还没有位置</p> : null}
+      {batch.error ? <p role="alert" className={styles.inlineNotice}>{batch.error}</p> : null}
       {page && page.data.length > 0 ? (
         <LocationGroups
           rows={page.data}
@@ -3086,6 +3115,7 @@ function LocationScreen({ id }: { id: string }) {
   const [params, setParams] = useSearchParams();
   const childrenRaw = params.get("children");
   const itemsRaw = params.get("items");
+  const selfOnly = params.get('scope') === 'direct';
   const loc = useQuery({
     queryKey: ["location", id],
     queryFn: () => getLocation(id),
@@ -3105,9 +3135,9 @@ function LocationScreen({ id }: { id: string }) {
     retry: false,
   });
   const directItems = useQuery({
-    queryKey: ["items", "at", id, itemsRaw ?? ""],
+    queryKey: ["items", "at", id, selfOnly, itemsRaw ?? ""],
     queryFn: () => {
-      const api = new URLSearchParams({ location: id });
+      const api = new URLSearchParams(selfOnly ? { location: id } : { in_location: id });
       if (itemsRaw) api.set("offset", itemsRaw);
       return listItems(api);
     },
@@ -3115,7 +3145,7 @@ function LocationScreen({ id }: { id: string }) {
     retry: false,
   });
   const childBatch = useLocationListBatch(`loc-children:${id}:${childrenRaw ?? ""}`);
-  const itemBatch = useItemListBatch(`loc-items:${id}:${itemsRaw ?? ""}`);
+  const itemBatch = useItemListBatch(`loc-items:${id}:${selfOnly}:${itemsRaw ?? ""}`);
   const [formReady, setFormReady] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -3279,7 +3309,7 @@ function LocationScreen({ id }: { id: string }) {
 
   return (
     <>
-      <h1 className={styles.title}>{heading}</h1>
+      <PageHeading title={heading} action={<Link className={styles.buttonPrimary} to={`/items/new?location=${id}`}>＋ 在这里记一件</Link>}/>
       <Breadcrumb path={record.path} />
       {childBatch.undo.message ? (
         <UndoBanner message={childBatch.undo.message} onUndo={() => void childBatch.undoDelete()} onDismiss={() => childBatch.undo.clear()} />
@@ -3295,11 +3325,12 @@ function LocationScreen({ id }: { id: string }) {
             disabled={cloneBox.isPending}
             onClick={() => cloneBox.mutate()}
           >
-            克隆
+            新建同款空盒
           </button>
         </div>
       ) : null}
       {cloneNotice ? <p>{cloneNotice}</p> : null}
+      {childBatch.error ? <p role="alert" className={styles.inlineNotice}>{childBatch.error}</p> : null}
       {cloneError ? <p className={styles.error}>{cloneError}</p> : null}
       <section>
         <h2 className={styles.sectionTitle}>子位置</h2>
@@ -3371,6 +3402,11 @@ function LocationScreen({ id }: { id: string }) {
       </section>
       <section>
         <h2 className={styles.sectionTitle}>物品</h2>
+        <div className={styles.chips}>
+          <button className={!selfOnly ? styles.chipActive : styles.chip} onClick={()=>setParams(current=>{const next=new URLSearchParams(current);next.delete('scope');next.delete('items');return next;})}>包含下级</button>
+          <button className={selfOnly ? styles.chipActive : styles.chip} onClick={()=>setParams(current=>{const next=new URLSearchParams(current);next.set('scope','direct');next.delete('items');return next;})}>仅直接存放</button>
+        </div>
+        {itemBatch.error ? <p role="alert" className={styles.inlineNotice}>{itemBatch.error}</p> : null}
         <SelectToggle
           selecting={itemBatch.selection.selecting}
           onToggle={() => itemBatch.selection.toggleMode()}
@@ -3384,7 +3420,7 @@ function LocationScreen({ id }: { id: string }) {
         ) : null}
         {directItems.data && directItems.data.total === 0 ? (
           <>
-            <p>这个位置里还没有物品</p>
+            <p>{selfOnly ? '这里没有直接存放的物品，可以切换「包含下级」查看盒内物品。' : '这个位置及下级位置还没有登记物品。'}</p>
             {record.direct_item_count > 0 ? <p>回收站里还有物品占用这个位置</p> : null}
           </>
         ) : null}
@@ -3399,13 +3435,11 @@ function LocationScreen({ id }: { id: string }) {
                 />
                 {itemBatch.selection.selecting ? (
                   <button className={styles.itemLink} type="button" onClick={() => itemBatch.selection.toggle(item.id)}>
-                    <ItemThumb photoId={item.photos[0]?.id} />
-                    <span className={styles.itemLinkBody}>{item.name}</span>
+                    <ItemSummary item={item}/>
                   </button>
                 ) : (
-                  <Link className={styles.itemLink} to={`/items/${item.id}`}>
-                    <ItemThumb photoId={item.photos[0]?.id} />
-                    <span className={styles.itemLinkBody}>{item.name}</span>
+                  <Link className={styles.itemLink} to={`/items/${item.id}`} state={{from:`/locations/${id}${params.toString() ? `?${params}` : ''}`}}>
+                    <ItemSummary item={item}/>
                   </Link>
                 )}
               </li>
@@ -3481,6 +3515,7 @@ function LocationScreen({ id }: { id: string }) {
             </button>
           </BatchBar>
         ) : null}
+        <details className={styles.filters}><summary>只记名称，快速添加</summary>
         <form onSubmit={onQuick}>
           <TextField label="名称" name="quick-name" value={quickName} onChange={setQuickName} error={fieldText(quickError, "name")} />
           {fieldText(quickError, "locations") ? <p className={styles.error}>{fieldText(quickError, "locations")}</p> : null}
@@ -3489,7 +3524,9 @@ function LocationScreen({ id }: { id: string }) {
             添加物品
           </button>
         </form>
+        </details>
       </section>
+      <details className={styles.editor}><summary>编辑位置资料</summary>
       <form onSubmit={onSave}>
         <TextField label="名称" name="name" value={name} onChange={setName} error={fieldText(formError, "name")} />
         {record.type !== "area" ? (
@@ -3546,6 +3583,7 @@ function LocationScreen({ id }: { id: string }) {
           />
         ) : null}
       </form>
+      </details>
     </>
   );
 }
@@ -3928,6 +3966,7 @@ function CategoryScreen({ id }: { id: string }) {
     <>
       <h1 className={styles.title}>{name}</h1>
       <CategoryBreadcrumb path={record.path} />
+      {itemBatch.error ? <p role="alert" className={styles.inlineNotice}>{itemBatch.error}</p> : null}
       {itemBatch.undo.message ? (
         <UndoBanner message={itemBatch.undo.message} onUndo={() => void itemBatch.undoTrash()} onDismiss={() => itemBatch.undo.clear()} />
       ) : null}
@@ -3992,13 +4031,11 @@ function CategoryScreen({ id }: { id: string }) {
                 />
                 {itemBatch.selection.selecting ? (
                   <button className={styles.itemLink} type="button" onClick={() => itemBatch.selection.toggle(item.id)}>
-                    <ItemThumb photoId={item.photos[0]?.id} />
-                    <span className={styles.itemLinkBody}>{item.name}</span>
+                    <ItemSummary item={item}/>
                   </button>
                 ) : (
-                  <Link className={styles.itemLink} to={`/items/${item.id}`}>
-                    <ItemThumb photoId={item.photos[0]?.id} />
-                    <span className={styles.itemLinkBody}>{item.name}</span>
+                  <Link className={styles.itemLink} to={`/items/${item.id}`} state={{from:`/categories/${id}${params.toString() ? `?${params}` : ''}`}}>
+                    <ItemSummary item={item}/>
                   </Link>
                 )}
               </li>
@@ -4075,6 +4112,7 @@ function CategoryScreen({ id }: { id: string }) {
           </BatchBar>
         ) : null}
       </section>
+      <details className={styles.editor}><summary>编辑分类资料</summary>
       <form onSubmit={onSave}>
         <TextField label="名称" name="name" value={name} onChange={setName} error={fieldText(formError, "name")} />
         <CategoryParentField
@@ -4108,6 +4146,7 @@ function CategoryScreen({ id }: { id: string }) {
           />
         ) : null}
       </form>
+      </details>
     </>
   );
 }
@@ -4141,7 +4180,8 @@ export function TrashListPage() {
 
   return (
     <>
-      <h1 className={styles.title}>回收站</h1>
+      <PageHeading title="回收站" description="暂时不需要的记录，仍可以恢复。"/>
+      {batch.error ? <p role="alert" className={styles.inlineNotice}>{batch.error}</p> : null}
       <SelectToggle
         selecting={batch.selection.selecting}
         onToggle={() => batch.selection.toggleMode()}

@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="dark" data-accent="moss">
+<html lang="zh-CN" data-theme="light" data-accent="moss">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#161a18" />
+    <meta name="theme-color" content="#f6f7f4" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="有处" />
@@ -15,12 +15,12 @@
       (function () {
         var theme = localStorage.getItem("youchu-theme");
         var accent = localStorage.getItem("youchu-accent");
-        if (theme !== "dark" && theme !== "light") theme = "dark";
+        if (theme !== "dark" && theme !== "light") theme = "light";
         if (accent !== "moss" && accent !== "clay" && accent !== "ink") accent = "moss";
         document.documentElement.setAttribute("data-theme", theme);
         document.documentElement.setAttribute("data-accent", accent);
         var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute("content", theme === "light" ? "#f3f6f4" : "#161a18");
+        if (meta) meta.setAttribute("content", theme === "light" ? "#f6f7f4" : "#161a18");
       })();
     </script>
   </head>

@@ -47,7 +47,12 @@ export function useListSelection(pageKey: string) {
     setSelecting(false);
   }
 
-  return { selecting, selected, toggleMode, toggle, selectAll, clear, pageAllSelected: (ids: number[]) => pageAllSelected(ids, selected) };
+  function retainFailed(ids: number[]) {
+    setSelected(new Set(ids));
+    setSelecting(ids.length > 0);
+  }
+
+  return { selecting, selected, toggleMode, toggle, selectAll, clear, retainFailed, pageAllSelected: (ids: number[]) => pageAllSelected(ids, selected) };
 }
 
 export function SelectToggle({
@@ -82,11 +87,13 @@ export function RowCheck({
   checked,
   disabled,
   onToggle,
+  label,
 }: {
   selecting: boolean;
   checked: boolean;
   disabled?: boolean;
   onToggle: () => void;
+  label?: string;
 }) {
   if (!selecting) return null;
   return (
@@ -98,7 +105,7 @@ export function RowCheck({
         if (disabled) return;
         onToggle();
       }}
-      aria-label={disabled ? "不能选择" : "选择"}
+      aria-label={`${disabled ? '不能选择' : '选择'}${label ? ` ${label}` : ''}`}
     />
   );
 }
@@ -244,6 +251,11 @@ export function useItemListBatch(pageKey: string) {
     await queryClient.invalidateQueries({ queryKey: ["items"] });
     await queryClient.invalidateQueries({ queryKey: ["locations"] });
     await queryClient.invalidateQueries({ queryKey: ["trash"] });
+    await queryClient.invalidateQueries({queryKey:['categories']});
+    await queryClient.invalidateQueries({queryKey:['item']});
+    await queryClient.invalidateQueries({queryKey:['location']});
+    await queryClient.invalidateQueries({queryKey:['category']});
+    await queryClient.invalidateQueries({queryKey:['return-tasks']});
   }
 
   async function trash(items: Item[]) {
@@ -252,8 +264,9 @@ export function useItemListBatch(pageKey: string) {
     const result = await runSequential(items, (item) => deleteItem(String(item.id), item.version), "无法删除");
     setPending(false);
     setConfirm(null);
-    selection.clear();
+    selection.retainFailed(result.failed.map(({row})=>row.id));
     setUndoItems(result.done.map((item) => ({ id: item.id, version: item.version + 1 })));
+    if(result.failed.length) setError(batchSummary(result.done.length,result.failed));
     undo.show(result.failed.length === 0 ? `已将 ${result.done.length} 件移到回收站` : batchSummary(result.done.length, result.failed));
     await refresh();
   }
@@ -275,7 +288,7 @@ export function useItemListBatch(pageKey: string) {
     setConfirm(null);
     setPicking(false);
     setDest(null);
-    selection.clear();
+    selection.retainFailed(result.failed.map(({row})=>row.id));
     undo.clear();
     setUndoItems([]);
     setError(result.failed.length === 0 ? "" : batchSummary(result.done.length, result.failed));
@@ -335,8 +348,9 @@ export function useLocationListBatch(pageKey: string) {
     const result = await runSequential(rows, (loc) => deleteLocation(String(loc.id), loc.version), "无法删除");
     setPending(false);
     setConfirm(false);
-    selection.clear();
+    selection.retainFailed(result.failed.map(({row})=>row.id));
     setSnapshots(result.done);
+    if(result.failed.length) setError(batchSummary(result.done.length,result.failed));
     undo.show(result.failed.length === 0 ? `已删除 ${result.done.length} 个位置` : batchSummary(result.done.length, result.failed));
     await refresh();
   }
@@ -376,7 +390,7 @@ export function useTrashListBatch(pageKey: string) {
     );
     setPending(false);
     setConfirm(false);
-    selection.clear();
+    selection.retainFailed(result.failed.map(({row})=>row.id));
     if (result.failed.length > 0) setError(batchSummary(result.done.length, result.failed));
     await queryClient.invalidateQueries({ queryKey: ["trash"] });
     await queryClient.invalidateQueries({ queryKey: ["items"] });
@@ -402,7 +416,7 @@ export function useReturnListBatch(pageKey: string) {
     );
     setPending(false);
     setConfirm(false);
-    selection.clear();
+    selection.retainFailed(result.failed.map(({row})=>row.id));
     if (result.failed.length > 0) setError(batchSummary(result.done.length, result.failed));
     await queryClient.invalidateQueries({ queryKey: ["return-tasks"] });
   }

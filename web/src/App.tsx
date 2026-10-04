@@ -6,7 +6,6 @@ import { fetchMe, login } from "./api";
 import {
   AccountPage,
   CategoryCreatePage,
-  CategoryListPage,
   CategoryPage,
   ItemCreatePage,
   ItemEditPage,
@@ -20,6 +19,8 @@ import {
   TrashListPage,
 } from "./pages";
 import styles from "./styles.module.css";
+import { ItemDetailPage } from './itemDetail';
+import { CategoryDirectoryPage, LocationDirectoryPage } from './directory';
 
 export function App() {
   return (
@@ -28,12 +29,14 @@ export function App() {
       <Route element={<RequireAuth />}>
         <Route path="/" element={<ItemListPage />} />
         <Route path="/items/new" element={<ItemCreatePage />} />
-        <Route path="/items/:id" element={<ItemEditPage />} />
+        <Route path="/items/:id" element={<ItemDetailPage />} />
+        <Route path="/items/:id/edit" element={<ItemEditPage />} />
         <Route path="/locations/new" element={<LocationCreatePage />} />
-        <Route path="/locations" element={<LocationListPage />} />
+        <Route path="/locations" element={<LocationDirectoryPage />} />
+        <Route path="/locations/manage" element={<LocationListPage />} />
         <Route path="/locations/:id" element={<LocationPage />} />
         <Route path="/categories/new" element={<CategoryCreatePage />} />
-        <Route path="/categories" element={<CategoryListPage />} />
+        <Route path="/categories" element={<CategoryDirectoryPage />} />
         <Route path="/categories/:id" element={<CategoryPage />} />
         <Route path="/returns" element={<ReturnListPage />} />
         <Route path="/account" element={<AccountPage />} />

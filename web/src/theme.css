@@ -1,21 +1,25 @@
 :root {
-  --paper: #f3f6f4;
-  --paper-raised: #ffffff;
-  --ink: #20362e;
+  --paper: #f6f7f4;
+  --paper-raised: #fdfefa;
+  --ink: #243d31;
   --ink-muted: #64766c;
-  --line: #dce5df;
+  --line: #dfe5dc;
   --clay: #27654c;
   --clay-press: #194c37;
   --on-clay: #ffffff;
   --danger: #9f1239;
-  --radius: 0.75rem;
-  --radius-sm: 0.5rem;
+  --radius: 0.625rem;
+  --radius-sm: 0.375rem;
   --font-display: "Songti SC", "STSong", "Noto Serif SC", "Noto Serif CJK SC", serif;
   --font-ui: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Noto Sans CJK SC", system-ui, sans-serif;
-  --page-max: 64rem;
+  --page-max: 69rem;
+  --sidebar-width: 14rem;
+  --sidebar: #183e2c;
+  --nav-height: calc(4rem + env(safe-area-inset-bottom));
+  --accent-soft: color-mix(in srgb, var(--clay) 8%, var(--paper));
   --login-max: 22rem;
   --control-min: 2.75rem;
-  --thumb: 4.5rem;
+  --thumb: 3.5rem;
   --space: 1rem;
 }
 
